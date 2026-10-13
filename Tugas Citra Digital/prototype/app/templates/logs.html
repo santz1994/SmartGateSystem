@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Log — Smart Gate{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>Log Audit</h2>
+  <form method="get" class="filters">
+    <label>Filter keputusan
+      <select name="decision" onchange="this.form.submit()">
+        <option value="">Semua</option>
+        {% for code, text in labels.items() %}
+          <option value="{{ code }}" {% if selected == code %}selected{% endif %}>{{ text }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </form>
+
+  <table class="data">
+    <thead>
+      <tr><th>#</th><th>Waktu</th><th>Session</th><th>Plat</th><th>Stiker</th><th>Skor</th><th>Keputusan</th><th>Satpam</th><th>Foto</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for log in logs %}
+      <tr>
+        <td>{{ log.id }}</td>
+        <td class="muted small">{{ log.created_at }}</td>
+        <td class="muted small"><code>{{ log.session_id }}</code></td>
+        <td><code>{{ log.plate_text or '—' }}</code></td>
+        <td><code>{{ log.sticker_code or '—' }}</code></td>
+        <td>{{ '%.2f'|format(log.fused_score) }}</td>
+        <td><span class="badge {{ alerts[log.decision] }}">{{ labels[log.decision] }}</span></td>
+        <td class="muted small">{{ log.override_by or '—' }}</td>
+        <td>{% if log.snapshot_url %}<img class="thumb" src="{{ url_for('snapshot', relative=log.snapshot_url.replace('snapshots/','')) }}" alt="snapshot">{% else %}—{% endif %}</td>
+        <td><a class="btn small" href="{{ url_for('log_detail', log_id=log.id) }}">Detail</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="10" class="muted">Tidak ada log.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

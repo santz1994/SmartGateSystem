@@ -1,0 +1,10 @@
+# --- Wajib (prototipe jalan penuh) ---
+opencv-python-headless>=4.8
+numpy>=1.24
+Pillow>=10.0
+Flask>=3.0
+
+# --- Opsional: OCR produksi (jauh lebih akurat dari fallback template matching) ---
+# Aktifkan bila ingin akurasi OCR kelas produksi. Berat (~500 MB).
+# paddleocr>=2.7
+# paddlepaddle>=2.6

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Foto Manual — Smart Gate{% endblock %}
+
+{% block content %}
+<section class="grid">
+  <div class="card">
+    <h2>Input Foto Manual</h2>
+    <p class="muted">
+      Unggah 1–2 foto kendaraan (plat dan/atau stiker terlihat). Foto diproses
+      dengan pipeline yang sama seperti CCTV: CLAHE → bilateral → deteksi plat →
+      koreksi perspektif → OCR → dekode stiker → fusi → keputusan.
+    </p>
+    <form id="upload-form">
+      <input type="file" id="upload-files" name="images" accept="image/*" multiple required>
+      <button type="submit">Proses Foto</button>
+    </form>
+    <p class="muted small">Format: JPG/PNG/BMP · maks 16 MB per berkas · backend OCR: <code>{{ backend }}</code></p>
+  </div>
+
+  <div class="card">
+    <h2>Hasil</h2>
+    <div id="upload-result"><p class="muted">Belum ada hasil.</p></div>
+  </div>
+</section>
+{% endblock %}

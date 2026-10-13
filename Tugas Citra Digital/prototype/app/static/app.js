@@ -1,0 +1,140 @@
+/* Front-end prototipe: tanpa framework, tanpa build step. */
+
+const $ = (sel) => document.querySelector(sel);
+
+function badge(alert) {
+  return `<span class="badge ${alert}">${alert}</span>`;
+}
+
+function renderResult(data) {
+  const frames = data.frames
+    .map(
+      (f) => `<tr>
+        <td>${f.label}</td>
+        <td>${f.cctv_role || 'manual'}</td>
+        <td><code>${f.plate_text || '—'}</code></td>
+        <td>${f.plate_confidence.toFixed(2)}</td>
+        <td><code>${f.sticker_code || '—'}</code></td>
+        <td>${f.sticker_confidence.toFixed(2)}</td>
+        <td>${f.sharpness.toFixed(0)}</td>
+        <td>${f.is_best_frame ? '<span class="badge GREEN">BEST</span>' : ''}</td>
+      </tr>`
+    )
+    .join('');
+
+  const vehicle = data.matched_vehicle
+    ? `<tr><td>Pemilik</td><td>${data.matched_vehicle.owner_name} (${data.matched_vehicle.owner_type})</td></tr>`
+    : '';
+
+  return `
+    <div class="result-head">
+      ${badge(data.alert)}
+      <span class="big">${data.decision_label}</span>
+    </div>
+    <table class="kv">
+      <tr><td>Kode keputusan</td><td><code>${data.decision}</code></td></tr>
+      <tr><td>Alasan</td><td>${data.reason}</td></tr>
+      <tr><td>Plat</td><td><code>${data.plate_text || '—'}</code> (${data.plate_confidence.toFixed(2)})</td></tr>
+      <tr><td>Stiker</td><td><code>${data.sticker_code || '—'}</code> (${data.sticker_confidence.toFixed(2)})</td></tr>
+      <tr><td>Skor fusi</td><td>${data.fused_score.toFixed(2)} (plat ${data.plate_score.toFixed(2)} / stiker ${data.sticker_score.toFixed(2)})</td></tr>
+      <tr><td>Sumber citra</td><td>${data.sources}</td></tr>
+      <tr><td>Backend OCR</td><td><code>${data.ocr_backend}</code></td></tr>
+      ${vehicle}
+      <tr><td>Session</td><td><code>${data.session_id}</code></td></tr>
+    </table>
+    ${data.snapshot_url ? `<p><img class="snapshot" src="/${data.snapshot_url}" alt="snapshot"></p>` : ''}
+    <table class="data">
+      <thead><tr><th>Frame</th><th>Sumber</th><th>Plat</th><th>Conf</th><th>Stiker</th><th>Conf</th><th>Ketajaman</th><th></th></tr></thead>
+      <tbody>${frames}</tbody>
+    </table>
+    ${data.log_id ? `<p><a class="btn" href="/logs/${data.log_id}">Lihat detail &amp; tahap pipeline</a></p>` : ''}
+  `;
+}
+
+async function postJSON(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return { ok: res.ok, data: await res.json() };
+}
+
+/* --- Simulasi CCTV --- */
+const simButton = $('#sim-run');
+if (simButton) {
+  simButton.addEventListener('click', async () => {
+    simButton.disabled = true;
+    simButton.textContent = 'Memproses…';
+    try {
+      const { ok, data } = await postJSON('/api/simulate', {
+        plate: $('#sim-plate').value,
+        sticker: $('#sim-sticker').value,
+        hard: $('#sim-hard').checked,
+      });
+      if (!ok) throw new Error(data.error || 'Gagal');
+      window.location.href = `/logs/${data.log_id}`;
+    } catch (err) {
+      alert(`Simulasi gagal: ${err.message}`);
+    } finally {
+      simButton.disabled = false;
+      simButton.textContent = 'Jalankan Simulasi';
+    }
+  });
+}
+
+/* --- Upload foto manual --- */
+const uploadForm = $('#upload-form');
+if (uploadForm) {
+  uploadForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const files = $('#upload-files').files;
+    if (!files.length) return;
+    const box = $('#upload-result');
+    box.innerHTML = '<p class="muted">Memproses…</p>';
+
+    const form = new FormData();
+    for (const file of files) form.append('images', file);
+
+    try {
+      const res = await fetch('/api/evaluate', { method: 'POST', body: form });
+      const data = await res.json();
+      box.innerHTML = res.ok ? renderResult(data) : `<p class="bad">${data.error}</p>`;
+    } catch (err) {
+      box.innerHTML = `<p class="bad">Gagal: ${err.message}</p>`;
+    }
+  });
+}
+
+/* --- Tindakan satpam --- */
+document.querySelectorAll('button[data-action]').forEach((button) => {
+  button.addEventListener('click', async () => {
+    const note = $('#guard-note').value.trim();
+    if (!note) {
+      $('#guard-msg').textContent = 'Catatan wajib diisi untuk audit.';
+      return;
+    }
+    const { ok, data } = await postJSON(`/api/logs/${button.dataset.log}/action`, {
+      action: button.dataset.action,
+      username: $('#guard-user').value,
+      note,
+    });
+    $('#guard-msg').textContent = data.message;
+    if (ok) setTimeout(() => window.location.reload(), 700);
+  });
+});
+
+/* --- Polling alert dashboard --- */
+if (window.SGS && window.SGS.pollAlerts) {
+  let lastId = 0;
+  setInterval(async () => {
+    try {
+      const res = await fetch('/api/alerts');
+      const data = await res.json();
+      if (lastId && data.latest_id > lastId) window.location.reload();
+      lastId = data.latest_id;
+    } catch {
+      /* dashboard tetap jalan walau polling gagal */
+    }
+  }, 3000);
+}

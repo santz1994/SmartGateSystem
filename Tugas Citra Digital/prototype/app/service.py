@@ -1,0 +1,340 @@
+"""Orkestrasi: dari citra mentah sampai keputusan + log audit.
+
+Alur satu sesi:
+    citra -> pre-processing -> deteksi plat/stiker -> OCR/dekode
+          -> best frame -> fusi skor -> pencocokan DB -> keputusan -> log
+"""
+
+from __future__ import annotations
+
+import sqlite3
+import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Iterable
+
+from . import config, db, fusion, ocr, pipeline, sticker, vehicles
+from .fusion import DECISION_ALERT, DECISION_LABEL, PENDING_DECISIONS
+
+
+@dataclass
+class FrameResult:
+    label: str
+    cctv_role: str | None
+    image_path: str | None = None
+    plate_text: str | None = None
+    plate_confidence: float = 0.0
+    sticker_code: str | None = None
+    sticker_confidence: float = 0.0
+    sharpness: float = 0.0
+    frame_score: float = 0.0
+    is_best_frame: bool = False
+    ocr_backend: str = ""
+    vehicle_class: str | None = None
+    detections: list[pipeline.Detection] = field(default_factory=list)
+    stages: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class EvaluationResult:
+    session_id: str
+    decision: str
+    reason: str
+    alert: str
+    label: str
+    plate_text: str | None
+    plate_confidence: float
+    sticker_code: str | None
+    sticker_confidence: float
+    fused_score: float
+    plate_score: float
+    sticker_score: float
+    sources: int
+    matched_vehicle: dict[str, Any] | None
+    matched_booking: dict[str, Any] | None
+    snapshot_url: str | None
+    log_id: int | None
+    frames: list[FrameResult]
+    thresholds: dict[str, float]
+    ocr_backend: str
+    vehicle_class: str | None = None
+    db_available: bool = True
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "decision": self.decision,
+            "decision_label": self.label,
+            "alert": self.alert,
+            "reason": self.reason,
+            "plate_text": self.plate_text,
+            "plate_confidence": self.plate_confidence,
+            "sticker_code": self.sticker_code,
+            "sticker_confidence": self.sticker_confidence,
+            "fused_score": self.fused_score,
+            "plate_score": self.plate_score,
+            "sticker_score": self.sticker_score,
+            "sources": self.sources,
+            "matched_vehicle": self.matched_vehicle,
+            "matched_booking": self.matched_booking,
+            "snapshot_url": self.snapshot_url,
+            "log_id": self.log_id,
+            "ocr_backend": self.ocr_backend,
+            "vehicle_class": self.vehicle_class,
+            "vehicle_class_label": vehicles.label(self.vehicle_class),
+            "db_available": self.db_available,
+            "thresholds": self.thresholds,
+            "frames": [
+                {
+                    "label": f.label,
+                    "cctv_role": f.cctv_role,
+                    "image_path": f.image_path,
+                    "plate_text": f.plate_text,
+                    "plate_confidence": f.plate_confidence,
+                    "sticker_code": f.sticker_code,
+                    "sticker_confidence": f.sticker_confidence,
+                    "sharpness": round(f.sharpness, 2),
+                    "frame_score": round(f.frame_score, 2),
+                    "is_best_frame": f.is_best_frame,
+                    "vehicle_class": f.vehicle_class,
+                    "vehicle_class_label": vehicles.label(f.vehicle_class),
+                    "detections": [
+                        {"kind": d.kind, "confidence": d.confidence, "payload": d.payload, "bbox": d.bbox}
+                        for d in f.detections
+                    ],
+                }
+                for f in self.frames
+            ],
+        }
+
+
+# --- Utilitas citra -----------------------------------------------------------
+
+def decode_image(data: bytes) -> Any:
+    """Bytes upload -> np.ndarray BGR. None bila bukan citra valid."""
+    cv2, np = pipeline._cv2(), pipeline._np()
+    buffer = np.frombuffer(data, dtype=np.uint8)
+    return cv2.imdecode(buffer, cv2.IMREAD_COLOR)
+
+
+def encode_image(image: Any, ext: str = ".jpg") -> bytes:
+    cv2 = pipeline._cv2()
+    ok, buffer = cv2.imencode(ext, image)
+    return buffer.tobytes() if ok else b""
+
+
+def _save(image: Any, relative: str) -> str:
+    path = config.SNAPSHOT_DIR / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(encode_image(image))
+    return f"snapshots/{relative}"
+
+
+# --- Pemrosesan satu frame ----------------------------------------------------
+
+def _process_frame(label: str, image: Any, cctv_role: str | None, session_id: str) -> FrameResult:
+    stages = pipeline.preprocess(image)
+    gray = stages["gray"]
+    sharpness = pipeline.laplacian_variance(gray)
+
+    plates = pipeline.detect_plates(image)
+    stickers = pipeline.detect_stickers(image)
+
+    result = FrameResult(label=label, cctv_role=cctv_role, sharpness=sharpness, stages=stages)
+
+    if plates:
+        best_plate = max(plates, key=lambda d: d.confidence)
+        text, confidence, backend = ocr.read_plate(best_plate.crop)
+        result.plate_text = text or None
+        result.plate_confidence = confidence
+        result.ocr_backend = backend
+        result.stages["plate_crop"] = best_plate.crop
+        result.stages["plate_raw"] = best_plate.meta.get("raw_crop")
+        result.stages["plate_enhanced"] = pipeline.enhance_plate(best_plate.crop)
+        result.vehicle_class = best_plate.meta.get("vehicle_class")
+
+    if stickers:
+        best_sticker = max(stickers, key=lambda d: d.confidence)
+        code, confidence, _ = sticker.decode_sticker(best_sticker)
+        result.sticker_code = code
+        result.sticker_confidence = confidence
+        result.stages["sticker_crop"] = best_sticker.crop
+
+    result.detections = plates + stickers
+    detection_conf = max((d.confidence for d in result.detections), default=0.0)
+    result.frame_score = pipeline.frame_score(image, detection_conf)
+    return result
+
+
+def _mark_best_frames(frames: list[FrameResult]) -> None:
+    """Satu best frame per sumber (per CCTV / per foto manual)."""
+    groups: dict[str, list[FrameResult]] = {}
+    for frame in frames:
+        groups.setdefault(frame.cctv_role or frame.label, []).append(frame)
+    for group in groups.values():
+        max(group, key=lambda f: f.frame_score).is_best_frame = True
+
+
+# --- Evaluasi sesi ------------------------------------------------------------
+
+def evaluate(
+    images: Iterable[tuple[str, Any, str | None]],
+    source: str = "manual",
+    session_id: str | None = None,
+    persist: bool = True,
+) -> EvaluationResult:
+    """Proses semua citra satu sesi dan hasilkan keputusan.
+
+    ``images`` berisi tuple ``(label, np.ndarray BGR, cctv_role)``.
+    """
+    session_id = session_id or uuid.uuid4().hex[:12]
+    thresholds = db.settings()
+
+    frames = [_process_frame(label, image, role, session_id) for label, image, role in images]
+    if not frames:
+        raise ValueError("Tidak ada citra untuk diproses")
+    _mark_best_frames(frames)
+
+    plate_confs = [f.plate_confidence for f in frames if f.plate_confidence > 0]
+    sticker_confs = [f.sticker_confidence for f in frames if f.sticker_confidence > 0]
+    sources = len({f.cctv_role or f.label for f in frames})
+    scores = fusion.fuse_scores(
+        plate_confs, sticker_confs, sources, thresholds.get("multi_camera_bonus", 0.05)
+    )
+
+    best_plate = max(frames, key=lambda f: f.plate_confidence)
+    best_sticker = max(frames, key=lambda f: f.sticker_confidence)
+    plate_text = best_plate.plate_text if best_plate.plate_confidence > 0 else None
+    plate_confidence = best_plate.plate_confidence
+    sticker_code = best_sticker.sticker_code if best_sticker.sticker_confidence > 0 else None
+    sticker_confidence = best_sticker.sticker_confidence
+
+    # --- Pencocokan database (fail-safe: error DB => tidak auto-open) ---
+    match = booking = None
+    db_available = True
+    try:
+        match = db.find_vehicle(plate_text, sticker_code)
+        if match is not None and match["requires_booking"] and plate_text:
+            booking = db.active_booking(plate_text)
+    except sqlite3.Error:
+        db_available = False
+        match = booking = None
+
+    decision, reason = fusion.decide(
+        plate_text=plate_text,
+        plate_confidence=plate_confidence,
+        sticker_code=sticker_code,
+        sticker_confidence=sticker_confidence,
+        fused_score=scores.fused_score,
+        match=match,
+        thresholds=thresholds,
+    )
+    if decision == fusion.AUTO_OPEN and match is not None and match["requires_booking"] and booking is None:
+        decision, reason = fusion.NO_MATCH, "Kendaraan terdaftar tapi booking tidak aktif"
+    if not db_available:
+        reason = "Database tidak tersedia — dialihkan ke satpam (fail-safe)"
+
+    # --- Simpan snapshot + log ---
+    snapshot_url = None
+    log_id = None
+    if persist:
+        for frame in frames:
+            annotated = pipeline.annotate(
+                frame.stages["original"], frame.detections, f"{frame.label}{' [BEST]' if frame.is_best_frame else ''}"
+            )
+            frame.image_path = _save(annotated, f"{session_id}/{frame.label}.jpg")
+            if frame.is_best_frame and snapshot_url is None:
+                snapshot_url = frame.image_path
+            _save_stages(frame, session_id)
+            db.insert_detection_event(
+                session_id=session_id,
+                source=source,
+                cctv_role=frame.cctv_role,
+                image_path=frame.image_path,
+                plate_text=frame.plate_text,
+                plate_confidence=frame.plate_confidence,
+                sticker_code=frame.sticker_code,
+                sticker_confidence=frame.sticker_confidence,
+                fused_score=scores.fused_score,
+                sharpness=frame.sharpness,
+                is_best_frame=int(frame.is_best_frame),
+                ocr_backend=frame.ocr_backend,
+                vehicle_class=frame.vehicle_class,
+            )
+        log_id = db.insert_gate_log(
+            session_id=session_id,
+            decision=decision,
+            plate_text=plate_text,
+            sticker_code=sticker_code,
+            fused_score=scores.fused_score,
+            matched_vehicle_id=match["id"] if match is not None else None,
+            matched_booking_id=booking["id"] if booking is not None else None,
+            snapshot_url=snapshot_url,
+            reason=reason,
+        )
+
+    return EvaluationResult(
+        session_id=session_id,
+        decision=decision,
+        reason=reason,
+        alert=DECISION_ALERT[decision],
+        label=DECISION_LABEL[decision],
+        plate_text=plate_text,
+        plate_confidence=plate_confidence,
+        sticker_code=sticker_code,
+        sticker_confidence=sticker_confidence,
+        fused_score=scores.fused_score,
+        plate_score=scores.plate_score,
+        sticker_score=scores.sticker_score,
+        sources=sources,
+        matched_vehicle=dict(match) if match is not None else None,
+        matched_booking=dict(booking) if booking is not None else None,
+        snapshot_url=snapshot_url,
+        log_id=log_id,
+        frames=frames,
+        thresholds=thresholds,
+        ocr_backend=next((f.ocr_backend for f in frames if f.ocr_backend), ocr.active_backend()),
+        vehicle_class=next((f.vehicle_class for f in frames if f.vehicle_class), None),
+        db_available=db_available,
+    )
+
+
+def _save_stages(frame: FrameResult, session_id: str) -> None:
+    """Simpan tiap tahap pipeline sebagai PNG — bahan visualisasi laporan."""
+    for name in ("original", "clahe", "denoise", "gray", "plate_raw", "plate_crop", "plate_enhanced", "sticker_crop"):
+        image = frame.stages.get(name)
+        if image is None or getattr(image, "size", 0) == 0:
+            continue
+        _save(image, f"{session_id}/stages/{frame.label}_{name}.png")
+
+
+# --- Tindakan satpam ----------------------------------------------------------
+
+def guard_action(log_id: int, action: str, username: str, note: str) -> tuple[bool, str]:
+    """Bypass (MANUAL_OVERRIDE) atau tolak (REJECTED) oleh satpam."""
+    if action not in ("bypass", "reject"):
+        return False, "Aksi tidak dikenal"
+    if not note.strip():
+        return False, "Catatan wajib diisi untuk audit"
+    decision = fusion.MANUAL_OVERRIDE if action == "bypass" else fusion.REJECTED
+    ok = db.resolve_override(log_id, decision, username, note.strip())
+    if not ok:
+        return False, "Log tidak ditemukan atau sudah final"
+    return True, DECISION_LABEL[decision]
+
+
+def pending_logs(limit: int = 20) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for decision in PENDING_DECISIONS:
+        rows.extend(dict(row) for row in db.list_gate_logs(limit=limit, decision=decision))
+    rows.sort(key=lambda row: row["id"], reverse=True)
+    return rows[:limit]
+
+
+def snapshot_path(relative: str) -> Path | None:
+    """Resolve path snapshot dengan proteksi path traversal."""
+    candidate = (config.SNAPSHOT_DIR / relative).resolve()
+    root = config.SNAPSHOT_DIR.resolve()
+    if root not in candidate.parents and candidate != root:
+        return None
+    return candidate if candidate.is_file() else None

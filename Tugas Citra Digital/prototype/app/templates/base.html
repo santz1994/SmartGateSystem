@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Smart Gate Prototype{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <strong>Smart Gate</strong>
+      <span class="muted">Prototipe Pengolahan Citra Digital</span>
+    </div>
+    <nav>
+      <a href="{{ url_for('dashboard') }}">Dashboard</a>
+      <a href="{{ url_for('upload_page') }}">Foto Manual</a>
+      <a href="{{ url_for('logs_page') }}">Log</a>
+      <a href="{{ url_for('api_health') }}" target="_blank">Health</a>
+    </nav>
+  </header>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="muted">
+    Prototipe — SQLite + OpenCV. OCR backend: <code>{{ backend if backend is defined else 'n/a' }}</code>
+  </footer>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

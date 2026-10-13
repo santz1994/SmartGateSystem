@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Log #{{ log.id }} — Smart Gate{% endblock %}
+
+{% block content %}
+<section class="grid">
+  <div class="card">
+    <h2>Log #{{ log.id }}</h2>
+    <p><span class="badge {{ alerts[log.decision] }}">{{ labels[log.decision] }}</span></p>
+    <table class="kv">
+      <tr><td>Session</td><td><code>{{ log.session_id }}</code></td></tr>
+      <tr><td>Waktu</td><td>{{ log.created_at }}</td></tr>
+      <tr><td>Plat terbaca</td><td><code>{{ log.plate_text or '—' }}</code></td></tr>
+      <tr><td>Stiker</td><td><code>{{ log.sticker_code or '—' }}</code></td></tr>
+      <tr><td>Skor fusi</td><td>{{ '%.2f'|format(log.fused_score) }}</td></tr>
+      <tr><td>Alasan</td><td>{{ log.reason or '—' }}</td></tr>
+      <tr><td>Satpam</td><td>{{ log.override_by or '—' }}</td></tr>
+      <tr><td>Catatan</td><td>{{ log.override_note or '—' }}</td></tr>
+      <tr><td>Waktu tindakan</td><td>{{ log.override_at or '—' }}</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Snapshot</h2>
+    {% if log.snapshot_url %}
+      <img class="snapshot" src="{{ url_for('snapshot', relative=log.snapshot_url.replace('snapshots/','')) }}" alt="snapshot">
+    {% else %}
+      <p class="muted">Tidak ada snapshot.</p>
+    {% endif %}
+  </div>
+
+  {% if pending %}
+  <div class="card">
+    <h2>Tindakan Satpam</h2>
+    <p class="muted">Bypass dan penolakan wajib disertai catatan — tercatat permanen di log audit.</p>
+    <label>Petugas
+      <select id="guard-user">
+        <option value="satpam1">satpam1 — Budi Santoso</option>
+        <option value="admin">admin — Administrator</option>
+      </select>
+    </label>
+    <label>Catatan (wajib)
+      <textarea id="guard-note" rows="3" placeholder="mis. Sudah dicek KTP & STNK, kendaraan tamu keluarga."></textarea>
+    </label>
+    <div class="actions">
+      <button class="ok" data-action="bypass" data-log="{{ log.id }}">Bypass — Buka Pintu Manual</button>
+      <button class="bad" data-action="reject" data-log="{{ log.id }}">Tolak Akses</button>
+    </div>
+    <p id="guard-msg" class="muted small"></p>
+  </div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Frame Terdeteksi</h2>
+  <table class="data">
+    <thead>
+      <tr><th>Frame</th><th>CCTV</th><th>Plat</th><th>Conf</th><th>Stiker</th><th>Conf</th><th>Ketajaman</th><th>Skor</th><th>Best</th><th>Foto</th></tr>
+    </thead>
+    <tbody>
+      {% for e in events %}
+      <tr>
+        <td>{{ e.id }}</td>
+        <td>{{ e.cctv_role or e.source }}</td>
+        <td><code>{{ e.plate_text or '—' }}</code></td>
+        <td>{{ '%.2f'|format(e.plate_confidence) }}</td>
+        <td><code>{{ e.sticker_code or '—' }}</code></td>
+        <td>{{ '%.2f'|format(e.sticker_confidence) }}</td>
+        <td>{{ '%.0f'|format(e.sharpness) }}</td>
+        <td>{{ '%.2f'|format(e.fused_score) }}</td>
+        <td>{% if e.is_best_frame %}<span class="badge GREEN">BEST</span>{% endif %}</td>
+        <td>{% if e.image_path %}<img class="thumb" src="{{ url_for('snapshot', relative=e.image_path.replace('snapshots/','')) }}" alt="frame">{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% if stages %}
+<section class="card">
+  <h2>Tahap Pipeline Pengolahan Citra</h2>
+  <div class="stages">
+    {% for s in stages %}
+      <figure>
+        <img src="{{ url_for('snapshot', relative=s.url.replace('snapshots/','')) }}" alt="{{ s.name }}">
+        <figcaption>{{ s.name }}</figcaption>
+      </figure>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

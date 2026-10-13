@@ -1,0 +1,26 @@
+# Dataset (terlalu besar untuk git — training di Colab/RoBoFlow)
+Tugas Citra Digital/prototype/Datasheet.zip
+Tugas Citra Digital/prototype/Datasheet 2.zip
+Tugas Citra Digital/prototype/datasets/
+Tugas Citra Digital/prototype/plat-nomor/**
+!Tugas Citra Digital/prototype/plat-nomor/data.yaml
+!Tugas Citra Digital/prototype/plat-nomor/a.ipynb
+
+# Data runtime
+Tugas Citra Digital/prototype/data/diag/
+Tugas Citra Digital/prototype/data/snapshots/
+Tugas Citra Digital/prototype/data/*.db
+Tugas Citra Digital/prototype/data/*.csv
+Tugas Citra Digital/prototype/runs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+
+# OS
+Thumbs.db
+.DS_Store

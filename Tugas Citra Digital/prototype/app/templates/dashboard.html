@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Smart Gate{% endblock %}
+
+{% block content %}
+<section class="grid">
+  <div class="card">
+    <h2>Statistik Keputusan</h2>
+    <table class="kv">
+      <tr><td>Total log</td><td><strong>{{ stats.TOTAL }}</strong></td></tr>
+      <tr><td>Buka pintu otomatis</td><td><strong class="ok">{{ stats.get('AUTO_OPEN', 0) }}</strong></td></tr>
+      <tr><td>Tidak dikenali</td><td><strong class="bad">{{ stats.get('NO_MATCH', 0) + stats.get('OCR_FAILED', 0) }}</strong></td></tr>
+      <tr><td>Perlu konfirmasi</td><td><strong class="warn">{{ stats.get('LOW_CONFIDENCE', 0) }}</strong></td></tr>
+      <tr><td>Bypass satpam</td><td><strong class="warn">{{ stats.get('MANUAL_OVERRIDE', 0) }}</strong></td></tr>
+      <tr><td>Ditolak</td><td><strong class="bad">{{ stats.get('REJECTED', 0) }}</strong></td></tr>
+      <tr><td>Kendaraan terdaftar</td><td><strong>{{ stats.VEHICLES }}</strong></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Simulasi CCTV 1 + CCTV 2</h2>
+    <p class="muted">Hasilkan sepasang frame sintetis (pendekatan + gate) lalu jalankan pipeline penuh.</p>
+    <label>Plat nomor
+      <input id="sim-plate" value="B 1234 XYZ" list="plate-list">
+      <datalist id="plate-list">
+        {% for v in vehicles %}<option value="{{ v.plate_number }}">{{ v.owner_name }}</option>{% endfor %}
+        <option value="B 9999 ZZZ">Kendaraan asing (tidak terdaftar)</option>
+      </datalist>
+    </label>
+    <label>Kode stiker (opsional)
+      <input id="sim-sticker" placeholder="STK-WRG-0042">
+    </label>
+    <label class="check">
+      <input type="checkbox" id="sim-hard"> Kondisi buruk (malam + hujan)
+    </label>
+    <button id="sim-run">Jalankan Simulasi</button>
+    <p class="muted small">Kendaraan terdaftar:
+      {% for v in vehicles %}<code>{{ v.plate_number }}</code>{% if v.sticker_code %} / <code>{{ v.sticker_code }}</code>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Menunggu Tindakan Satpam</h2>
+    <div id="pending-list">
+      {% if pending %}
+        {% for log in pending %}
+          <div class="pending-item" data-id="{{ log.id }}">
+            <span class="badge {{ alerts[log.decision] }}">{{ labels[log.decision] }}</span>
+            <div>
+              <div><code>{{ log.plate_text or '—' }}</code> · skor {{ '%.2f'|format(log.fused_score) }}</div>
+              <div class="muted small">{{ log.reason }}</div>
+            </div>
+            <a class="btn small" href="{{ url_for('log_detail', log_id=log.id) }}">Tangani</a>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="muted">Tidak ada antrean.</p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Log Terbaru</h2>
+  <table class="data">
+    <thead>
+      <tr><th>#</th><th>Waktu</th><th>Plat</th><th>Stiker</th><th>Skor</th><th>Keputusan</th><th>Foto</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for log in logs %}
+      <tr>
+        <td>{{ log.id }}</td>
+        <td class="muted small">{{ log.created_at }}</td>
+        <td><code>{{ log.plate_text or '—' }}</code></td>
+        <td><code>{{ log.sticker_code or '—' }}</code></td>
+        <td>{{ '%.2f'|format(log.fused_score) }}</td>
+        <td><span class="badge {{ alerts[log.decision] }}">{{ labels[log.decision] }}</span></td>
+        <td>{% if log.snapshot_url %}<img class="thumb" src="{{ url_for('snapshot', relative=log.snapshot_url.replace('snapshots/','')) }}" alt="snapshot">{% else %}—{% endif %}</td>
+        <td><a class="btn small" href="{{ url_for('log_detail', log_id=log.id) }}">Detail</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="muted">Belum ada log. Jalankan simulasi atau unggah foto.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.SGS = { pollAlerts: true };
+</script>
+{% endblock %}
