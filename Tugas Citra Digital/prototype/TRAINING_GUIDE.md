@@ -22,6 +22,14 @@ Proyek ini memiliki 2 dataset utama di folder `prototype/`:
 - Format plat: `H2512AOC`, `BH2618MA`, dll (tanpa kode wilayah)
 - Cocok untuk training/evaluasi OCR
 
+### 4. `dataset_merged/` (gabungan 1 + 2 — **DIPAKAI untuk training lokal**)
+- Dibuat otomatis: `plat-nomor/` (split asli) + `datasets/detection/yolo_format/` (COCO yang dikonversi, split 85/15)
+- Isi: train 1557, valid 290, test 84 — kelas `number-plate`
+- Regenerate: `python tools/convert_coco_to_yolo.py` lalu jalankan skrip merge di riwayat sesi, atau buat ulang dari kedua sumber
+- File config: `dataset_merged/data.yaml`
+
+**Konversi COCO → YOLO:** `python tools/convert_coco_to_yolo.py` menghasilkan `datasets/detection/yolo_format/` (1370 gambar + label).
+
 ---
 
 ## Cara Training YOLOv8
@@ -77,8 +85,12 @@ python train_yolo.py --epochs 50 --imgsz 640 --batch 16 --device 0
 ### Opsi C: CPU Only (Lambat, untuk testing kecil)
 
 ```bash
-python train_yolo.py --epochs 10 --imgsz 640 --batch 8 --device cpu
+python train_yolo.py --data dataset_merged/data.yaml --epochs 15 --imgsz 416 --batch 8 --device cpu --patience 5 --name smartgate
 ```
+
+Catatan CPU (laptop i5-8250U): `imgsz=416` + `batch=8` + `yolov8n` adalah kombinasi
+paling cepat yang masih layak; 1 epoch ≈ beberapa puluh menit. Untuk hasil optimal
+tetap disarankan Colab GPU T4 (Opsi A) dengan `--imgsz 640 --epochs 50`.
 
 ---
 

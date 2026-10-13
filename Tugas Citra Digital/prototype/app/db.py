@@ -245,6 +245,39 @@ def active_booking(plate_number: str) -> sqlite3.Row | None:
             (plate_number,),
         ).fetchone()
 
+# --- Master kendaraan ----------------------------------------------------------
+
+def list_vehicles() -> list[sqlite3.Row]:
+    with session() as conn:
+        return conn.execute(
+            "SELECT * FROM master_vehicles ORDER BY is_active DESC, id"
+        ).fetchall()
+
+def get_vehicle(vehicle_id: int) -> sqlite3.Row | None:
+    with session() as conn:
+        return conn.execute("SELECT * FROM master_vehicles WHERE id = ?", (vehicle_id,)).fetchone()
+
+def insert_vehicle(**fields: Any) -> int:
+    cols = ", ".join(fields)
+    marks = ", ".join("?" * len(fields))
+    with session() as conn:
+        cur = conn.execute(f"INSERT INTO master_vehicles ({cols}) VALUES ({marks})", list(fields.values()))
+        return int(cur.lastrowid)
+
+def update_vehicle(vehicle_id: int, **fields: Any) -> bool:
+    assigns = ", ".join(f"{col} = ?" for col in fields)
+    with session() as conn:
+        cur = conn.execute(
+            f"UPDATE master_vehicles SET {assigns} WHERE id = ?", [*fields.values(), vehicle_id]
+        )
+        return cur.rowcount > 0
+
+def delete_vehicle(vehicle_id: int) -> bool:
+    """Hard delete. SQLite menolak bila kendaraan sudah tercatat di gate_logs (FK)."""
+    with session() as conn:
+        cur = conn.execute("DELETE FROM master_vehicles WHERE id = ?", (vehicle_id,))
+        return cur.rowcount > 0
+
 
 def insert_detection_event(**fields: Any) -> int:
     cols = ", ".join(fields)

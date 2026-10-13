@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Kamera — Smart Gate{% endblock %}
+
+{% block content %}
+<section class="grid">
+  <div class="card">
+    <h2>Kamera &amp; Auto Scan Plat</h2>
+    <p class="muted">
+      Aktifkan kamera (webcam / CCTV yang dikenali browser), lalu pindai plat nomor
+      secara manual atau otomatis. Setiap frame melewati pipeline penuh:
+      deteksi plat → pilih kendaraan terdekat → OCR → fusi → keputusan.
+    </p>
+    <video id="cam-video" autoplay playsinline muted class="snapshot"></video>
+    <canvas id="cam-canvas" hidden></canvas>
+    <p>
+      <button id="cam-start" type="button">Aktifkan Kamera</button>
+      <button id="cam-stop" type="button">Matikan</button>
+      <button id="cam-scan" type="button">Scan &amp; Simpan Log</button>
+    </p>
+    <p>
+      <label><input type="checkbox" id="cam-auto"> Auto scan</label>
+      <label>Interval
+        <select id="cam-interval">
+          <option value="2000">2 detik</option>
+          <option value="3000" selected>3 detik</option>
+          <option value="5000">5 detik</option>
+        </select>
+      </label>
+    </p>
+    <p class="muted small">
+      Auto scan tidak menulis log (hanya preview). Gunakan
+      <strong>Scan &amp; Simpan Log</strong> untuk mencatat kejadian resmi + foto.
+    </p>
+    <p class="muted">Status: <strong id="cam-status">Kamera belum aktif.</strong></p>
+  </div>
+
+  <div class="card">
+    <h2>Hasil Scan</h2>
+    <div id="cam-result"><p class="muted">Belum ada hasil.</p></div>
+  </div>
+</section>
+{% endblock %}

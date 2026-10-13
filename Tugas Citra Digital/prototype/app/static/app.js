@@ -124,6 +124,83 @@ document.querySelectorAll('button[data-action]').forEach((button) => {
   });
 });
 
+/* --- Kamera + auto scan plat --- */
+const camVideo = $('#cam-video');
+if (camVideo) {
+  const canvas = $('#cam-canvas');
+  const resultBox = $('#cam-result');
+  const statusEl = $('#cam-status');
+  let stream = null;
+  let timer = null;
+  let busy = false;
+
+  const snapBlob = () =>
+    new Promise((resolve) => {
+      canvas.width = camVideo.videoWidth;
+      canvas.height = camVideo.videoHeight;
+      canvas.getContext('2d').drawImage(camVideo, 0, 0);
+      canvas.toBlob(resolve, 'image/jpeg', 0.9);
+    });
+
+  async function scan(persist) {
+    if (busy || !stream || !camVideo.videoWidth) return;
+    busy = true;
+    statusEl.textContent = 'Memindai…';
+    try {
+      const blob = await snapBlob();
+      const form = new FormData();
+      form.append('images', blob, 'camera.jpg');
+      const res = await fetch(`/api/evaluate?persist=${persist ? 1 : 0}`, { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Gagal memindai');
+      resultBox.innerHTML = renderResult(data);
+      statusEl.textContent = `Plat: ${data.plate_text || 'tidak terbaca'} (${data.plate_confidence.toFixed(2)}) — ${data.decision_label}`;
+    } catch (err) {
+      statusEl.textContent = `Gagal: ${err.message}`;
+    } finally {
+      busy = false;
+    }
+  }
+
+  $('#cam-start').addEventListener('click', async () => {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 } },
+        audio: false,
+      });
+      camVideo.srcObject = stream;
+      statusEl.textContent = 'Kamera aktif.';
+    } catch (err) {
+      statusEl.textContent = `Kamera gagal: ${err.message}`;
+    }
+  });
+
+  $('#cam-stop').addEventListener('click', () => {
+    if (stream) stream.getTracks().forEach((track) => track.stop());
+    stream = null;
+    camVideo.srcObject = null;
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+    $('#cam-auto').checked = false;
+    statusEl.textContent = 'Kamera dimatikan.';
+  });
+
+  $('#cam-scan').addEventListener('click', () => scan(true));
+  $('#cam-auto').addEventListener('change', (event) => {
+    if (event.target.checked) {
+      const ms = Number($('#cam-interval').value) || 3000;
+      timer = setInterval(() => scan(false), ms);
+      statusEl.textContent = `Auto scan aktif tiap ${ms / 1000} detik (tanpa simpan log).`;
+    } else if (timer) {
+      clearInterval(timer);
+      timer = null;
+      statusEl.textContent = 'Auto scan berhenti.';
+    }
+  });
+}
+
 /* --- Polling alert dashboard --- */
 if (window.SGS && window.SGS.pollAlerts) {
   let lastId = 0;

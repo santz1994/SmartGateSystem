@@ -140,8 +140,30 @@ def enhance_plate(crop: Any, target_height: int = 160) -> Any:
     merged = cv2.merge([clahe.apply(l_ch), a_ch, b_ch])
     enhanced = cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
 
+    # Tutup celah goresan karakter yang pudar (hujan/kotor) sebelum penajaman.
+    enhanced = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
+
     blur = cv2.GaussianBlur(enhanced, (0, 0), 3.0)
     return cv2.addWeighted(enhanced, 1.6, blur, -0.6, 0)
+
+def closeness(det: Detection, image_shape: Any) -> float:
+    """Skor kedekatan ke kamera: bbox besar + bawah frame = kendaraan terdekat."""
+    h, w = image_shape[:2]
+    x1, y1, x2, y2 = det.bbox
+    area_ratio = ((x2 - x1) * (y2 - y1)) / max(h * w, 1)
+    front = 1.5 if y2 > h * 0.6 else 1.0  # bawah frame = lebih dekat
+    return area_ratio * front
+
+def pick_primary_plate(detections: list[Detection], image_shape: Any) -> Detection | None:
+    """Pilih plat kendaraan paling dekat kamera saat ada >1 kandidat.
+
+    Terdekat = bbox terbesar + paling bawah dalam frame. Itu kendaraan yang
+    siap masuk gerbang; plat kendaraan lain diabaikan sampai maju sendiri.
+    Keyakinan deteksi hanya pemecah seri.
+    """
+    if not detections:
+        return None
+    return max(detections, key=lambda det: (closeness(det, image_shape), det.confidence))
 
 
 # --- Deteksi plat -------------------------------------------------------------
@@ -257,6 +279,79 @@ def split_rows(crop: Any) -> list[Any]:
         return [crop]
     return [crop[: best[0]], crop[best[0] + best[1] :]]
 
+def snap_to_text_band(crop: Any) -> tuple[Any, tuple[int, int, int, int]]:
+    """Persempit kandidat ke pita teks plat, buang konteks bodi kendaraan.
+
+    Kandidat klasik sering berupa blob besar (lampu + logo + plat) karena ambang
+    menggabungkan area terang. Pita yang dipilih = baris dengan run karakter
+    sempit terbanyak (deretan huruf/angka), bukan blok warna/teks kecil.
+    Kembalikan ``(crop, (x1, y1, x2, y2))`` dengan kotak pada ruang crop awal.
+    """
+    cv2, np = _cv2(), _np()
+    binary = _ink_mask(crop, trim_x=0.02, trim_y=0.02)
+    h, w = binary.shape
+    if h < 8 or w < 8:
+        return crop, (0, 0, w, h)
+
+    ink_rows = (binary > 0).sum(axis=1)
+    row_thresh = max(1, int(w * 0.01))
+    bands: list[tuple[int, int]] = []
+    start: int | None = None
+    for y, value in enumerate(ink_rows):
+        if value > row_thresh and start is None:
+            start = y
+        elif value <= row_thresh and start is not None:
+            bands.append((start, y))
+            start = None
+    if start is not None:
+        bands.append((start, h))
+    bands = [(a, b) for a, b in bands if b - a >= max(4, int(h * 0.06))]
+    if not bands:
+        return crop, (0, 0, w, h)
+
+    def glyph_runs(band: tuple[int, int]) -> int:
+        sub = binary[band[0] : band[1]]
+        ink = (sub > 0).sum(axis=0)
+        thresh = max(1, int(sub.shape[0] * 0.10))
+        runs, in_run = 0, False
+        for value in ink:
+            if value > thresh:
+                if not in_run:
+                    runs += 1
+                in_run = True
+            else:
+                in_run = False
+        return runs
+
+    scored = [(glyph_runs(band), band[1] - band[0], band[0], band[1]) for band in bands]
+    best = max(scored)
+    # Sertakan baris kedua (plat truk 2 baris) bila sebanding dengan baris utama.
+    keep = [(a, b) for runs, height, a, b in scored if height >= 0.5 * best[1] and runs >= 0.4 * best[0]]
+    y1 = max(min(a for a, _ in keep) - int(h * 0.05), 0)
+    y2 = min(max(b for _, b in keep) + int(h * 0.05), h)
+    sub = binary[y1:y2]
+    cols = np.nonzero((sub > 0).sum(axis=0) > max(1, int(sub.shape[0] * 0.05)))[0]
+    if cols.size:
+        margin = int(w * 0.04)
+        x1, x2 = max(int(cols[0]) - margin, 0), min(int(cols[-1]) + margin, w)
+    else:
+        x1, x2 = 0, w
+    snapped = crop[y1:y2, x1:x2]
+    if not snapped.size:
+        return crop, (0, 0, w, h)
+    return snapped, (x1, y1, x2, y2)
+
+def _tight_quad(quad: Any, crop_shape: Any, rect: tuple[int, int, int, int]) -> Any:
+    """Petakan kotak ruang-crop kembali ke ruang gambar — quad jadi rapat."""
+    cv2, np = _cv2(), _np()
+    h, w = crop_shape[:2]
+    x1, y1, x2, y2 = rect
+    src = np.array([[[0, 0]], [[w - 1, 0]], [[w - 1, h - 1]], [[0, h - 1]]], dtype="float32")
+    dst = np.asarray(quad, dtype="float32").reshape(4, 1, 2)
+    matrix = cv2.getPerspectiveTransform(src, dst)
+    box = np.array([[[x1, y1]], [[x2, y1]], [[x2, y2]], [[x1, y2]]], dtype="float32")
+    return order_points(cv2.perspectiveTransform(box, matrix).reshape(4, 2))
+
 def plate_texture_ok(crop: Any) -> bool:
     """Tolak kandidat yang tidak menyerupai papan plat.
 
@@ -364,9 +459,11 @@ def detect_plates_classic(image: Any, max_candidates: int = 4) -> list[Detection
         if len(detections) >= max_candidates:
             break
         quad = order_points(box)
-        crop = four_point_transform(image, quad)
+        full_crop = four_point_transform(image, quad)
+        crop, rect = snap_to_text_band(full_crop)  # buang konteks bodi dari blob kandidat
         if crop.size == 0 or not plate_texture_ok(crop):
             continue
+        quad = _tight_quad(quad, full_crop.shape, rect)  # bbox akurat = pita teks saja
         vehicle_class, orientation, glyphs, plausibility = plate_plausibility(crop)
         if plausibility <= 0.0:
             continue

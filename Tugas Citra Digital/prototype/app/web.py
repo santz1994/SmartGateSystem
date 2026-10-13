@@ -6,13 +6,16 @@ tiap 3 detik. Untuk prototipe ini cukup, dan menghilangkan satu dependensi.
 
 from __future__ import annotations
 
+import sqlite3
 from typing import Any
 
-from flask import Flask, abort, jsonify, render_template, request, send_file
+from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, url_for
 
-from . import config, db, detect_yolo, fusion, ocr, pipeline, service, simulate, sticker
+from . import config, db, detect_yolo, fusion, ocr, pipeline, service, simulate, sticker, vehicles
 
 ROLE_CHOICES = ("satpam1", "admin")
+VEHICLE_TYPES = ("car", "motorcycle", "truck", "custom")
+OWNER_TYPES = ("warga", "karyawan", "tamu")
 
 
 def create_app() -> Flask:
@@ -69,6 +72,54 @@ def create_app() -> Flask:
             stages=_stage_files(row["session_id"]),
         )
 
+    @app.get("/camera")
+    def camera_page() -> str:
+        return render_template("camera.html", backend=ocr.active_backend())
+
+    # --- Manajemen kendaraan ---------------------------------------------------
+
+    @app.get("/vehicles")
+    def vehicles_page() -> str:
+        edit_id = request.args.get("edit", type=int)
+        row = db.get_vehicle(edit_id) if edit_id else None
+        return _vehicles_page(edit=dict(row) if row else None)
+
+    @app.post("/vehicles/save")
+    def vehicles_save() -> Any:
+        vehicle_id = request.form.get("id", type=int)
+        fields = {
+            "plate_number": (request.form.get("plate_number") or "").strip().upper(),
+            "sticker_code": (request.form.get("sticker_code") or "").strip().upper() or None,
+            "owner_name": (request.form.get("owner_name") or "").strip(),
+            "owner_type": (request.form.get("owner_type") or "").strip(),
+            "vehicle_type": (request.form.get("vehicle_type") or "").strip(),
+            "requires_booking": 1 if request.form.get("requires_booking") else 0,
+            "valid_until": (request.form.get("valid_until") or "").strip() or None,
+            "is_active": 1 if request.form.get("is_active") else 0,
+        }
+        error = _validate_vehicle(fields)
+        if not error:
+            try:
+                if vehicle_id:
+                    db.update_vehicle(vehicle_id, **fields)
+                else:
+                    db.insert_vehicle(**fields)
+            except sqlite3.IntegrityError:
+                error = "Plat nomor atau kode stiker sudah terdaftar."
+        if error:
+            return _vehicles_page(edit={**fields, "id": vehicle_id}, error=error), 400
+        return redirect(url_for("vehicles_page"))
+
+    @app.post("/vehicles/<int:vehicle_id>/delete")
+    def vehicles_delete(vehicle_id: int) -> Any:
+        """Hapus kendaraan; bila sudah tercatat di log audit, cukup nonaktifkan
+        agar jejak foto & keputusan tidak putus (FK menolak hard delete)."""
+        try:
+            db.delete_vehicle(vehicle_id)
+        except sqlite3.IntegrityError:
+            db.update_vehicle(vehicle_id, is_active=0)
+        return redirect(url_for("vehicles_page"))
+
     # --- API ------------------------------------------------------------------
 
     @app.post("/api/evaluate")
@@ -85,7 +136,9 @@ def create_app() -> Flask:
                 return jsonify({"error": f"Berkas '{storage.filename}' bukan citra yang valid"}), 400
             images.append((f"manual{index}", image, None))
 
-        result = service.evaluate(images, source="manual")
+        result = service.evaluate(
+            images, source="manual", persist=request.args.get("persist", "1") != "0"
+        )
         return jsonify(result.as_dict())
 
     @app.post("/api/simulate")
@@ -177,6 +230,30 @@ def _vehicles() -> list[dict[str, Any]]:
             "FROM master_vehicles WHERE is_active = 1 ORDER BY id"
         ).fetchall()
     return [dict(row) for row in rows]
+
+def _validate_vehicle(fields: dict[str, Any]) -> str | None:
+    if not fields["plate_number"]:
+        return "Plat nomor wajib diisi."
+    if not fields["owner_name"]:
+        return "Nama pemilik wajib diisi."
+    if fields["owner_type"] not in OWNER_TYPES:
+        return "Jenis pemilik tidak valid."
+    if fields["vehicle_type"] not in VEHICLE_TYPES:
+        return "Jenis kendaraan tidak valid."
+    if fields["valid_until"] and len(fields["valid_until"]) != 10:
+        return "Format 'berlaku s.d.' harus YYYY-MM-DD."
+    return None
+
+def _vehicles_page(edit: dict[str, Any] | None = None, error: str | None = None) -> str:
+    return render_template(
+        "vehicles.html",
+        rows=db.list_vehicles(),
+        edit=edit,
+        error=error,
+        vehicle_types=[(key, vehicles.label(key)) for key in VEHICLE_TYPES],
+        owner_types=OWNER_TYPES,
+        backend=ocr.active_backend(),
+    )
 
 
 def _stage_files(session_id: str) -> list[dict[str, str]]:

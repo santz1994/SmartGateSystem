@@ -143,8 +143,13 @@ def _process_frame(label: str, image: Any, cctv_role: str | None, session_id: st
     result = FrameResult(label=label, cctv_role=cctv_role, sharpness=sharpness, stages=stages)
 
     if plates:
-        best_plate = max(plates, key=lambda d: d.confidence)
-        text, confidence, backend = ocr.read_plate(best_plate.crop)
+        # Baca semua kandidat dulu: blob palsu bisa lebih "dekat" tapi tidak
+        # terbaca. Pilihan = kendaraan terdekat kamera yang terbaca kredibel.
+        readings = [(det, *ocr.read_plate(det.crop)) for det in plates]
+        credible = [r for r in readings if r[1] and r[2] >= 0.5]
+        best_plate, text, confidence, backend = max(
+            credible or readings, key=lambda r: pipeline.closeness(r[0], image.shape)
+        )
         result.plate_text = text or None
         result.plate_confidence = confidence
         result.ocr_backend = backend
@@ -202,10 +207,11 @@ def evaluate(
         plate_confs, sticker_confs, sources, thresholds.get("multi_camera_bonus", 0.05)
     )
 
-    best_plate = max(frames, key=lambda f: f.plate_confidence)
+    # Voting mayoritas antar-frame: menahan 1 frame buram yang salah baca.
+    plate_text, plate_confidence = fusion.vote_plate(
+        [(f.plate_text, f.plate_confidence) for f in frames]
+    )
     best_sticker = max(frames, key=lambda f: f.sticker_confidence)
-    plate_text = best_plate.plate_text if best_plate.plate_confidence > 0 else None
-    plate_confidence = best_plate.plate_confidence
     sticker_code = best_sticker.sticker_code if best_sticker.sticker_confidence > 0 else None
     sticker_confidence = best_sticker.sticker_confidence
 

@@ -132,10 +132,37 @@ def test_end_to_end() -> None:
     check("stiker terdeteksi", len(stickers) > 0, f"(dapat {len(stickers)})")
 
 
+def test_vote_plate() -> None:
+    print("vote_plate")
+    text, conf = fusion.vote_plate(
+        [("B 1234 XYZ", 0.9), ("B1234XYZ", 0.8), ("B1284XYZ", 0.95), (None, 0.0)]
+    )
+    check("mayoritas menang", text == "B1234XYZ", f"(dapat {text!r})")
+    check("keyakinan = rata-rata pemenang", abs(conf - 0.85) < 1e-6, f"(dapat {conf})")
+    text, conf = fusion.vote_plate([(None, 0.0), ("", 0.4)])
+    check("tanpa pembacaan -> (None, 0)", text is None and conf == 0.0)
+
+def test_pick_primary_plate() -> None:
+    print("pick_primary_plate")
+
+    def det(box: tuple[int, int, int, int], conf: float) -> pipeline.Detection:
+        x1, y1, x2, y2 = box
+        quad = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+        return pipeline.Detection(kind="plate", quad=quad, confidence=conf)
+
+    far = det((400, 100, 480, 120), 0.9)  # kecil, atas frame (mengekor)
+    near = det((300, 400, 500, 460), 0.7)  # besar, bawah frame (siap masuk)
+    shape = (600, 800, 3)
+    picked = pipeline.pick_primary_plate([far, near], shape)
+    check("kendaraan paling depan dipilih", picked is near, f"(dapat {picked.bbox if picked else None})")
+    check("daftar kosong -> None", pipeline.pick_primary_plate([], shape) is None)
+
 def main() -> int:
     tests = [
         test_normalize_plate,
         test_fuse_scores,
+        test_vote_plate,
+        test_pick_primary_plate,
         test_decide,
         test_geometry,
         test_end_to_end,

@@ -48,6 +48,28 @@ class FusionResult:
     fused_score: float
     sources: int
 
+def vote_plate(readings: list[tuple[str | None, float]]) -> tuple[str | None, float]:
+    """Voting mayoritas antar-frame: teks paling sering muncul menang.
+
+    Satu frame buram sering salah baca; mengumpulkan 5-10 frame lalu voting
+    menaikkan akurasi tanpa model yang lebih berat. Kembalikan
+    ``(teks_pemenang, keyakinan_rata2_pembacaan_pemenang)``.
+    """
+    import re
+
+    buckets: dict[str, list[float]] = {}
+    for text, confidence in readings:
+        if not text:
+            continue
+        key = re.sub(r"[^A-Z0-9]", "", text.upper())
+        if key:
+            buckets.setdefault(key, []).append(float(confidence))
+    if not buckets:
+        return None, 0.0
+    winner = max(buckets, key=lambda k: (len(buckets[k]), sum(buckets[k])))
+    votes = buckets[winner]
+    return winner, round(sum(votes) / len(votes), 4)
+
 
 def fuse_scores(
     plate_confs: list[float],

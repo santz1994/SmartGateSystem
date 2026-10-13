@@ -244,12 +244,46 @@ def _read_paddle(crop: Any) -> tuple[str, float]:
     return normalize_plate(text), round(confidence, 4)
 
 
+# --- Backend: EasyOCR ---------------------------------------------------------
+
+@lru_cache(maxsize=1)
+def _easy_reader():
+    import easyocr
+
+    return easyocr.Reader(["en"], gpu=False, verbose=False)
+
+def _read_easyocr(crop: Any) -> tuple[str, float]:
+    np = _np()
+    results = _easy_reader().readtext(crop)
+    if not results:
+        return "", 0.0
+    # Plat 2 baris = 2 kotak setinggi sebanding; baris tanggal/tambahan dibuang.
+    boxes = []
+    for points, text, confidence in results:
+        pts = np.asarray(points, dtype="float32")
+        height = float(pts[:, 1].max() - pts[:, 1].min())
+        baseline = float(pts[:, 1].max())
+        left = float(pts[:, 0].min())
+        boxes.append((baseline, left, height, float(confidence), text))
+    max_height = max(b[2] for b in boxes)
+    rows = [b for b in boxes if b[2] >= 0.6 * max_height]
+    if not rows:
+        rows = [max(boxes, key=lambda b: b[2])]
+    # Urut baca: sejajar baseline (baris) dulu, baru kiri->kanan.
+    rows.sort(key=lambda b: (b[0], b[1]))
+    text = normalize_plate("".join(b[4] for b in rows))
+    confidence = float(np.mean([b[3] for b in rows]))
+    return text, round(min(confidence, 0.99), 4)
+
 @lru_cache(maxsize=1)
 def active_backend() -> str:
     import importlib.util
 
-    return "paddleocr" if importlib.util.find_spec("paddleocr") else "template_match"
-
+    if importlib.util.find_spec("paddleocr"):
+        return "paddleocr"
+    if importlib.util.find_spec("easyocr"):
+        return "easyocr"
+    return "template_match"
 
 def read_plate(crop: Any) -> tuple[str, float, str]:
     """Baca plat dari crop yang sudah di-deskew. -> (teks, keyakinan, backend)."""
@@ -258,6 +292,12 @@ def read_plate(crop: Any) -> tuple[str, float, str]:
             text, confidence = _read_paddle(crop)
             return text, confidence, "paddleocr"
         except Exception:  # noqa: BLE001 - prototipe harus tetap jalan
+            pass
+    if active_backend() == "easyocr":
+        try:
+            text, confidence = _read_easyocr(crop)
+            return text, confidence, "easyocr"
+        except Exception:  # noqa: BLE001 - jatuh ke template_match bila model belum ada
             pass
     text, confidence = _read_template_multiline(crop)
     return text, confidence, "template_match"
