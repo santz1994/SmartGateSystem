@@ -1,0 +1,7 @@
+path: D:/Project/Smart Gate System/Tugas Citra Digital/prototype/dataset_merged
+train: train/images
+val: valid/images
+test: test/images
+
+nc: 1
+names: ['number-plate']
