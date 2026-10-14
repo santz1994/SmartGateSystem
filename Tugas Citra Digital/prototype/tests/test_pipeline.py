@@ -160,6 +160,11 @@ def test_vote_plate() -> None:
     check("tanpa pembacaan -> (None, 0)", text is None and conf == 0.0)
     text, _ = fusion.vote_plate([("AA5O45YN", 0.9), ("AA5045YN", 0.8)])
     check("voting menggunakan normalisasi NRKB", text == "AA5045YN", f"(dapat {text!r})")
+    text, conf = fusion.vote_plate(
+        [("AA1111AA", 0.95, "approach"), ("DD1884UA", 0.70, "gate")]
+    )
+    check("kamera gate berbobot lebih tinggi", text == "DD1884UA", f"(dapat {text!r})")
+    check("bobot gate tidak menaikkan confidence palsu", abs(conf - 0.70) < 1e-6)
 
 def test_evidence_fusion() -> None:
     print("fusi bukti")

@@ -55,25 +55,40 @@ def normalize_evidence_text(text: str | None) -> str | None:
     return compact or None
 
 
-def vote_plate(readings: list[tuple[str | None, float]]) -> tuple[str | None, float]:
+def vote_plate(
+    readings: list[tuple[str | None, float] | tuple[str | None, float, str | None]],
+) -> tuple[str | None, float]:
     """Voting mayoritas antar-frame: teks paling sering muncul menang.
 
     Satu frame buram sering salah baca; mengumpulkan 5-10 frame lalu voting
     menaikkan akurasi tanpa model yang lebih berat. Kembalikan
     ``(teks_pemenang, keyakinan_rata2_pembacaan_pemenang)``.
     """
-    buckets: dict[str, list[float]] = {}
-    for text, confidence in readings:
+    buckets: dict[str, list[tuple[float, float]]] = {}
+    for reading in readings:
+        text, confidence = reading[:2]
+        role = reading[2] if len(reading) > 2 else None
+        # Kamera gate lebih dekat sehingga detail karakter lebih tinggi.
+        # Bobot dipakai untuk voting, bukan untuk menaikkan confidence mentah.
+        weight = 2.0 if role == "gate" else 1.0
         key = normalize_evidence_text(text)
         if key:
             from .ocr import normalize_plate
             key = normalize_plate(key)
-            buckets.setdefault(key, []).append(float(confidence))
+            buckets.setdefault(key, []).append((float(confidence), weight))
     if not buckets:
         return None, 0.0
-    winner = max(buckets, key=lambda k: (len(buckets[k]), sum(buckets[k])))
+    winner = max(
+        buckets,
+        key=lambda key: (
+            sum(weight for _, weight in buckets[key]),
+            sum(confidence * weight for confidence, weight in buckets[key]),
+        ),
+    )
     votes = buckets[winner]
-    return winner, round(sum(votes) / len(votes), 4)
+    total_weight = sum(weight for _, weight in votes)
+    confidence = sum(value * weight for value, weight in votes) / total_weight
+    return winner, round(confidence, 4)
 
 
 def vote_sticker(readings: list[tuple[str | None, float]]) -> tuple[str | None, float]:

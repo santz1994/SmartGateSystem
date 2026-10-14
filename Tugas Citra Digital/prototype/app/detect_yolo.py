@@ -31,6 +31,7 @@ from .pipeline import (
     plate_plausibility,
     plate_texture_ok,
     snap_to_text_band,
+    _tight_quad,
 )
 
 ENV_VAR = "SGS_YOLO_WEIGHTS"
@@ -177,6 +178,13 @@ def detect(image: Any, max_candidates: int = 4) -> list[Detection]:
         # tanpa glyph, tetapi jangan menggugurkan plat valid hanya karena kontras.
         if not texture_ok and plausibility < 0.35:
             continue
+        # Bobot hasil training kadang mengurung seluruh bagian depan mobil,
+        # bukan papan platnya. Persempit box visual dan crop OCR ke pita teks
+        # agar EasyOCR tidak ikut membaca gril, logo, atau bumper.
+        text_band, text_rect = snap_to_text_band(crop)
+        if getattr(text_band, "size", 0):
+            quad = _tight_quad(quad, crop.shape, text_rect)
+            crop = text_band
         ocr_crop = four_point_transform(image, _padded_quad(quad, image.shape))
         # Bobot lama kadang memberi box sedikit lebih besar dari papan plat.
         # Buang konteks bodi/roda sebelum EasyOCR agar suffix tidak tenggelam

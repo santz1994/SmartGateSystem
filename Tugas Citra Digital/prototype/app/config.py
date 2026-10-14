@@ -14,7 +14,8 @@ DATA_DIR = Path(os.getenv("SGS_DATA_DIR", BASE_DIR / "data"))
 SNAPSHOT_DIR = DATA_DIR / "snapshots"
 DIAGNOSTIC_DIR = DATA_DIR / "diag" / "ocr_failed"
 DB_PATH = Path(os.getenv("SGS_DB", DATA_DIR / "smartgate.db"))
-MAX_DIAGNOSTIC_FILES = 100
+DIAGNOSTIC_COOLDOWN_SECONDS = 30.0
+MAX_DIAGNOSTIC_BUNDLES = 10
 
 # Ambang default. Nilai ini yang dipakai bila baris system_settings tidak ada.
 DEFAULTS: dict[str, float] = {
