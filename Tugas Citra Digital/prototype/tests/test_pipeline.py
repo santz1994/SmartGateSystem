@@ -126,6 +126,13 @@ def test_geometry() -> None:
     flat = np.full((64, 64), 128, dtype=np.uint8)
     check("Laplacian variance: tajam > rata", pipeline.laplacian_variance(sharp) > pipeline.laplacian_variance(flat))
 
+    # Warna latar plat dan bodi dapat mirip; quality gate harus tetap memakai
+    # struktur tepi karakter, bukan mengharuskan plat putih/kontras global.
+    colored = np.full((48, 160, 3), (92, 86, 110), dtype=np.uint8)
+    for x in range(18, 145, 20):
+        colored[14:36, x : x + 7] = (70, 66, 84)
+    check("plat berwarna dengan bodi serupa lolos tekstur", pipeline.plate_texture_ok(colored))
+
 
 def test_end_to_end() -> None:
     print("end-to-end pipeline (citra sintetis)")

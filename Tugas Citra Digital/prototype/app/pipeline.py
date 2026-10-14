@@ -19,8 +19,9 @@ from . import config, vehicles
 PLATE_MAX_AREA_RATIO = 0.35
 PLATE_TARGET_HEIGHT = 64
 
-# Plat harus selalu terlihat seperti papan: kontras tinggi, tepi rapi. Ambang ini
-# membuang false-positive "segitiga" (potongan aspal) yang punya tepi kabur.
+# Plat harus terlihat seperti papan berisi karakter. Warna absolut tidak dipakai
+# karena TNKB dapat hitam, putih, kuning, merah, atau memiliki warna yang dekat
+# dengan bodi kendaraan.
 PLATE_MIN_EDGE_RATIO = 0.012  # tepi Canny / luas bbox
 PLATE_MIN_CONTRAST = 28.0  # std dev citra abu-abu (diturunkan untuk plat redup/kecil)
 PLATE_ASPECT_IDEAL = 3.0  # fallback skor bila tahap OCR dimatikan
@@ -486,22 +487,28 @@ def _tight_quad(quad: Any, crop_shape: Any, rect: tuple[int, int, int, int]) -> 
 def plate_texture_ok(crop: Any) -> bool:
     """Tolak kandidat yang tidak menyerupai papan plat.
 
-    Dua ciri: kepadatan tepi cukup tinggi (ada huruf) dan kontras cukup besar
-    (papan terang dengan huruf gelap). Langit/aspal licin akan gagal di sini.
+    Gunakan tepi dari luminance yang dinormalisasi lokal dan kanal warna LAB.
+    Dengan begitu plat berwarna atau plat yang menyatu secara warna dengan bodi
+    tetap dapat lolos bila karakter di dalamnya menghasilkan struktur tepi.
     """
     cv2, np = _cv2(), _np()
-    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    if gray.size == 0:
+    if getattr(crop, "size", 0) == 0:
         return False
-    # Kotak putih seragam (plat overexposed atau jaket terang) tidak cukup
-    # sebagai bukti plat; OCR terhadapnya hanya menghasilkan false confidence.
-    if float(np.mean(gray > 245)) > 0.82 and float(np.std(gray)) < 32.0:
+    lab = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB)
+    luminance = lab[:, :, 0]
+    local = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(luminance)
+    edges = cv2.Canny(local, 40, 140)
+    color_edges = cv2.Canny(lab[:, :, 1], 35, 120) | cv2.Canny(lab[:, :, 2], 35, 120)
+    combined = cv2.bitwise_or(edges, color_edges)
+    h, w = luminance.shape
+    edge_ratio = float(np.count_nonzero(combined)) / max(h * w, 1)
+    local_contrast = float(np.std(local))
+    raw_contrast = float(np.std(luminance))
+    # Area benar-benar kosong tetap ditolak; ambang kontras hanya cadangan,
+    # bukan lagi syarat mutlak seperti pada versi grayscale sebelumnya.
+    if edge_ratio < PLATE_MIN_EDGE_RATIO:
         return False
-    edges = cv2.Canny(gray, 60, 180)
-    h, w = gray.shape
-    if float(edges.sum() / 255) / max(h * w, 1) < PLATE_MIN_EDGE_RATIO:
-        return False
-    return float(np.std(gray)) >= PLATE_MIN_CONTRAST
+    return local_contrast >= 18.0 or raw_contrast >= PLATE_MIN_CONTRAST or edge_ratio >= 0.025
 
 def plate_plausibility(crop: Any) -> tuple[str, str, int, float]:
     """Nilai kelayakan kandidat: (kelas, orientasi, jumlah glyph, skor).
