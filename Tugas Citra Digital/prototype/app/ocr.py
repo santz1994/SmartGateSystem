@@ -15,10 +15,13 @@ butuh ~40 ms, tidak perlu diulang tiap request.
 from __future__ import annotations
 
 import re
+import logging
 from functools import lru_cache
 from typing import Any
 
 from . import config
+
+LOGGER = logging.getLogger(__name__)
 from .pipeline import _cv2, _np, split_rows
 
 CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -284,7 +287,18 @@ def _read_template_multiline(crop: Any) -> tuple[str, float]:
 
 @lru_cache(maxsize=1)
 def _paddle_reader():
+    # PaddlePaddle 3.x dapat memilih oneDNN secara otomatis pada CPU Windows.
+    # Beberapa operator PP-OCRv6 belum kompatibel dengan executor oneDNN dan
+    # menghasilkan NotImplementedError saat inferensi. Pakai executor CPU
+    # standar agar OCR tetap berjalan konsisten.
+    import os
+
+    os.environ["FLAGS_use_mkldnn"] = "0"
+    os.environ["FLAGS_enable_pir_api"] = "0"
     from paddleocr import PaddleOCR
+    import paddle
+
+    paddle.set_flags({"FLAGS_use_mkldnn": False})
 
     try:
         return PaddleOCR(
@@ -506,8 +520,8 @@ def read_plate(crop: Any) -> tuple[str, float, str]:
         try:
             text, confidence = _read_paddle(crop)
             return text, confidence, "paddleocr"
-        except Exception:  # noqa: BLE001 - prototipe harus tetap jalan
-            pass
+        except Exception:  # noqa: BLE001 - fallback tetap menjaga service hidup
+            LOGGER.exception("PaddleOCR gagal membaca crop plat")
     if active_backend() == "easyocr":
         try:
             text, confidence = _read_easyocr(crop)

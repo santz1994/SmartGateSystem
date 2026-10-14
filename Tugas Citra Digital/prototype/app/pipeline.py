@@ -549,10 +549,14 @@ def detect_plates(image: Any, max_candidates: int = 8) -> list[Detection]:
     detector_image, offset = detection_roi(detection_preprocess(image))
 
     if detect_yolo.available():
-        # Jika YOLO aktif tetapi semua kandidat gagal quality gate, jangan
-        # menghidupkan fallback klasik: fallback dapat mengembalikan blob
-        # bumper/aspal yang justru sudah ditolak oleh gate YOLO.
         detections = detect_yolo.detect(detector_image, max_candidates)
+        # Rekaman monitor dapat membuat pola plat berbeda jauh dari data
+        # training YOLO (moire, pantulan, dan refresh layar). Dalam kondisi
+        # itu YOLO bisa kosong meskipun papan plat terlihat jelas. Jalankan
+        # detektor klasik hanya sebagai fallback kosong; jalur klasik tetap
+        # memiliki gate tekstur, geometri, dan struktur glyph.
+        if not detections:
+            detections = detect_plates_classic(detector_image, max_candidates)
         return translate_detections(detections, offset)
     detections = detect_plates_classic(detector_image, max_candidates)
     return translate_detections(detections, offset)

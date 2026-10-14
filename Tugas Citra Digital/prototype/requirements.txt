@@ -4,13 +4,13 @@ numpy>=1.24
 Pillow>=10.0
 Flask>=3.0
 
-# --- OCR produksi (PaddleOCR) ---
-# PaddleOCR dipakai sebagai backend utama; template matching tetap menjadi
-# fallback lokal bila model OCR belum tersedia.
+# --- OCR produksi (EasyOCR) ---
+# EasyOCR dipakai sebagai backend utama pada Windows CPU.
+easyocr>=1.7
+
+# --- OCR alternatif ---
 paddleocr>=3.0
 paddlepaddle>=3.0
-# EasyOCR hanya fallback kompatibilitas untuk environment lama.
-# easyocr>=1.7
 
 # QR signed token memakai HMAC-SHA256 dari Python standard library; tidak
 # membutuhkan dependency kriptografi tambahan.
