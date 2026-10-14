@@ -17,10 +17,18 @@ ROLE_CHOICES = ("satpam1", "admin")
 VEHICLE_TYPES = ("car", "motorcycle", "truck", "custom")
 OWNER_TYPES = ("warga", "karyawan", "tamu")
 
+# Run training YOLO (train_yolo.py --name smartgate) — dipantau halaman /training.
+TRAIN_RUN_DIR = config.BASE_DIR / "runs" / "detect" / "runs" / "detect" / "smartgate"
+TRAIN_PLOTS = ("results.png", "labels.jpg", "train_batch0.jpg", "confusion_matrix_normalized.png")
+
 
 def create_app() -> Flask:
     config.ensure_dirs()
     db.init_db()
+
+    import threading
+
+    threading.Thread(target=ocr.warmup, daemon=True).start()  # model siap sebelum scan pertama
 
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = config.MAX_UPLOAD_MB * 1024 * 1024
@@ -75,6 +83,19 @@ def create_app() -> Flask:
     @app.get("/camera")
     def camera_page() -> str:
         return render_template("camera.html", backend=ocr.active_backend())
+
+    @app.get("/training")
+    def training_page() -> str:
+        return render_template("training.html", status=training_status(), backend=ocr.active_backend())
+
+    @app.get("/training/plot/<name>")
+    def training_plot(name: str) -> Any:
+        if name not in TRAIN_PLOTS:
+            abort(404)
+        path = TRAIN_RUN_DIR / name
+        if not path.is_file():
+            abort(404)
+        return send_file(path)
 
     # --- Manajemen kendaraan ---------------------------------------------------
 
@@ -136,8 +157,15 @@ def create_app() -> Flask:
                 return jsonify({"error": f"Berkas '{storage.filename}' bukan citra yang valid"}), 400
             images.append((f"manual{index}", image, None))
 
+        def enabled(name: str) -> bool:
+            return request.args.get(name, "1").strip().lower() not in {"0", "false", "off"}
+
         result = service.evaluate(
-            images, source="manual", persist=request.args.get("persist", "1") != "0"
+            images,
+            source="manual",
+            persist=request.args.get("persist", "1") != "0",
+            plate_enabled=enabled("plate"),
+            sticker_enabled=enabled("sticker"),
         )
         return jsonify(result.as_dict())
 
@@ -204,6 +232,8 @@ def create_app() -> Flask:
                 "status": "ok",
                 "plate_backend": detect_yolo.status(),
                 "ocr_backend": ocr.active_backend(),
+                "detection_roi": config.DETECTION_ROI,
+                "detection_gamma": config.DETECTION_GAMMA,
                 "sticker_decoders": sticker.available_decoders(),
                 "db": str(config.DB_PATH),
             }
@@ -230,6 +260,24 @@ def _vehicles() -> list[dict[str, Any]]:
             "FROM master_vehicles WHERE is_active = 1 ORDER BY id"
         ).fetchall()
     return [dict(row) for row in rows]
+
+def training_status() -> dict[str, Any]:
+    """Status training YOLO dari results.csv run — untuk halaman /training."""
+    import csv
+
+    epochs: list[dict[str, str]] = []
+    csv_path = TRAIN_RUN_DIR / "results.csv"
+    if csv_path.is_file():
+        with csv_path.open(newline="", encoding="utf-8") as fh:
+            epochs = [{k.strip(): v.strip() for k, v in row.items()} for row in csv.DictReader(fh)]
+    weights = TRAIN_RUN_DIR / "weights" / "best.pt"
+    return {
+        "epochs": epochs,
+        "latest": epochs[-1] if epochs else None,
+        "plots": [name for name in TRAIN_PLOTS if (TRAIN_RUN_DIR / name).is_file()],
+        "weights_ready": weights.is_file(),
+        "weights_size_mb": round(weights.stat().st_size / 1e6, 1) if weights.is_file() else 0,
+    }
 
 def _validate_vehicle(fields: dict[str, Any]) -> str | None:
     if not fields["plate_number"]:

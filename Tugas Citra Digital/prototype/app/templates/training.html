@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Training YOLO — Smart Gate{% endblock %}
+
+{% block content %}
+<meta http-equiv="refresh" content="15">
+
+<section class="card">
+  <h2>Proses Training YOLOv8 — <code>dataset_merged</code></h2>
+  <p class="muted">
+    Halaman ini memantau training yang berjalan (auto-refresh 15 detik).
+    Sumber data: <code>plat-nomor/</code> + <code>datasets/detection/</code> (COCO).
+    Bobot terbaik dipakai prototipe via <code>SGS_YOLO_WEIGHTS</code>.
+  </p>
+  <table class="kv">
+    <tr><td>Epoch tercapai</td><td>{{ status.epochs|length }}</td></tr>
+    <tr><td>Bobot <code>best.pt</code></td>
+        <td>{% if status.weights_ready %}<span class="badge GREEN">siap ({{ status.weights_size_mb }} MB)</span>{% else %}<span class="badge AMBER">belum ada</span>{% endif %}</td></tr>
+    {% if status.latest %}
+    <tr><td>mAP50 terakhir</td><td><strong>{{ '%.3f'|format(status.latest['metrics/mAP50(B)']|float) }}</strong></td></tr>
+    <tr><td>Precision / Recall</td>
+        <td>{{ '%.2f'|format(status.latest['metrics/precision(B)']|float) }} / {{ '%.2f'|format(status.latest['metrics/recall(B)']|float) }}</td></tr>
+    {% endif %}
+  </table>
+</section>
+
+<section class="card">
+  <h3>Riwayat Epoch</h3>
+  <table class="data">
+    <thead>
+      <tr><th>Epoch</th><th>Waktu (s)</th><th>box_loss</th><th>cls_loss</th><th>Precision</th><th>Recall</th><th>mAP50</th><th>mAP50-95</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for e in status.epochs|reverse %}
+      <tr>
+        <td>{{ e.epoch }}</td>
+        <td class="muted small">{{ '%.0f'|format(e.time|float) }}</td>
+        <td>{{ '%.3f'|format(e['train/box_loss']|float) }}</td>
+        <td>{{ '%.3f'|format(e['train/cls_loss']|float) }}</td>
+        <td>{{ '%.2f'|format(e['metrics/precision(B)']|float) }}</td>
+        <td>{{ '%.2f'|format(e['metrics/recall(B)']|float) }}</td>
+        <td><strong>{{ '%.3f'|format(e['metrics/mAP50(B)']|float) }}</strong></td>
+        <td>{{ '%.3f'|format(e['metrics/mAP50-95(B)']|float) }}</td>
+        <td><div style="background:#2ea;border-radius:3px;height:10px;width:{{ (e['metrics/mAP50(B)']|float * 80)|round|int }}px"></div></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" class="muted">Training belum dimulai / results.csv belum ada.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="grid">
+  {% for plot in status.plots %}
+  <div class="card">
+    <h3>{{ plot }}</h3>
+    <img class="snapshot" src="{{ url_for('training_plot', name=plot) }}" alt="{{ plot }}">
+  </div>
+  {% endfor %}
+</section>
+{% endblock %}

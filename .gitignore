@@ -2,6 +2,8 @@
 Tugas Citra Digital/prototype/Datasheet.zip
 Tugas Citra Digital/prototype/Datasheet 2.zip
 Tugas Citra Digital/prototype/datasets/
+Tugas Citra Digital/prototype/dataset_merged/
+Tugas Citra Digital/prototype/dataset_extra/
 Tugas Citra Digital/prototype/plat-nomor/**
 !Tugas Citra Digital/prototype/plat-nomor/data.yaml
 !Tugas Citra Digital/prototype/plat-nomor/a.ipynb
@@ -24,3 +26,8 @@ venv/
 # OS
 Thumbs.db
 .DS_Store
+
+# Zip
+*.zip
+dataset_merged_colab.zip
+smartgate-colab-2-results.zip

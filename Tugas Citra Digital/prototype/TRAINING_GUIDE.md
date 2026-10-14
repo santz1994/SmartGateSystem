@@ -1,165 +1,233 @@
-# Panduan Training YOLOv8 untuk Deteksi Plat Nomor Indonesia
+# Panduan Training Smart Gate System
 
-## Dataset yang Tersedia
+Dokumen ini menjelaskan dataset, training detektor plat nomor, evaluasi OCR, dan
+cara memasang model ke prototype Flask. Perintah pada contoh dijalankan dari
+folder `prototype/`.
 
-Proyek ini memiliki 2 dataset utama di folder `prototype/`:
+## 1. Komponen Dataset
 
-### 1. `plat-nomor/` (Roboflow Universe - **RECOMMENDED untuk training YOLO**)
-- Format: YOLO (images + labels .txt)
-- Split: train (393), valid (84), test (84)
-- Kelas: `number-plate` (1 kelas)
-- Sumber: Roboflow Universe `saya-tidak-suka-comvis/plat-nomor-bpqge`
-- File config: `plat-nomor/data.yaml`
+### Dataset lokal
 
-### 2. `datasets/detection/` (COCO format)
-- Format: COCO JSON (`annotations/annotations.json`)
-- 1377 gambar, 2128 anotasi
-- Kelas: `plate_number`
-- Cocok untuk evaluasi deteksi (mAP)
+| Folder | Format | Isi | Kegunaan |
+| --- | --- | --- | --- |
+| `plat-nomor/` | YOLO detection | 393 train, 84 valid, 84 test | Sumber deteksi awal |
+| `datasets/detection/` | COCO | 1.377 gambar dan 2.128 anotasi | Dikonversi ke YOLO |
+| `datasets/text/` | CSV + crop | 1.863 crop dengan `label.csv` | Evaluasi/pengembangan OCR |
+| `dataset_merged/` | YOLO detection | train 1.557, valid 290, test 84 | Dataset training utama |
+| `dataset_extra/` | Gambar web | 13 positif dan 2 negatif terakhir | Data tambahan, bukan ground truth utama |
 
-### 3. `datasets/text/` (OCR dataset)
-- 1863 crop plat + `label.csv` (ground truth teks)
-- Format plat: `H2512AOC`, `BH2618MA`, dll (tanpa kode wilayah)
-- Cocok untuk training/evaluasi OCR
+`dataset_merged/data.yaml` saat ini hanya memiliki satu kelas:
 
-### 4. `dataset_merged/` (gabungan 1 + 2 — **DIPAKAI untuk training lokal**)
-- Dibuat otomatis: `plat-nomor/` (split asli) + `datasets/detection/yolo_format/` (COCO yang dikonversi, split 85/15)
-- Isi: train 1557, valid 290, test 84 — kelas `number-plate`
-- Regenerate: `python tools/convert_coco_to_yolo.py` lalu jalankan skrip merge di riwayat sesi, atau buat ulang dari kedua sumber
-- File config: `dataset_merged/data.yaml`
-
-**Konversi COCO → YOLO:** `python tools/convert_coco_to_yolo.py` menghasilkan `datasets/detection/yolo_format/` (1370 gambar + label).
-
----
-
-## Cara Training YOLOv8
-
-### Opsi A: Google Colab (Gratis, GPU T4) — **RECOMMENDED**
-
-1. Buka [Google Colab](https://colab.research.google.com/)
-2. Runtime → Change runtime type → GPU T4
-3. Upload folder `plat-nomor/` ke Colab (atau clone dari Roboflow)
-4. Jalankan notebook berikut:
-
-```python
-# Install dependencies
-!pip install ultralytics -q
-
-# Training
-from ultralytics import YOLO
-
-model = YOLO('yolov8n.pt')  # nano: cepat, ringan. Ganti 'yolov8s.pt' untuk akurasi lebih baik
-
-results = model.train(
-    data='/content/plat-nomor/data.yaml',  # sesuaikan path
-    epochs=50,
-    imgsz=640,
-    batch=16,
-    device=0,          # GPU
-    project='runs/detect',
-    name='train',
-    patience=20,
-    save=True,
-    plots=True,
-)
-
-# Best weights akan di: /content/runs/detect/train/weights/best.pt
-# Download file ini ke lokal
+```yaml
+nc: 1
+names: ['number-plate']
 ```
 
-### Opsi B: Local GPU (Windows/Linux dengan CUDA)
+Model deteksi yang tersedia saat ini mendeteksi plat nomor. Stiker masih
+diproses oleh pipeline stiker/fallback dan belum menjadi kelas YOLO terpisah.
+Jika stiker akan dilatih, anotasi stiker harus ditambahkan secara konsisten
+terlebih dahulu.
 
-```bash
-# 1. Buat virtual environment (recommended)
-python -m venv .venv
-.venv\Scripts\activate  # Windows
-# source .venv/bin/activate  # Linux/Mac
+### Mengonversi dan menggabungkan data
 
-# 2. Install dependencies
-pip install ultralytics torch torchvision --index-url https://download.pytorch.org/whl/cu118
-
-# 3. Training
-python train_yolo.py --epochs 50 --imgsz 640 --batch 16 --device 0
-```
-
-### Opsi C: CPU Only (Lambat, untuk testing kecil)
-
-```bash
-python train_yolo.py --data dataset_merged/data.yaml --epochs 15 --imgsz 416 --batch 8 --device cpu --patience 5 --name smartgate
-```
-
-Catatan CPU (laptop i5-8250U): `imgsz=416` + `batch=8` + `yolov8n` adalah kombinasi
-paling cepat yang masih layak; 1 epoch ≈ beberapa puluh menit. Untuk hasil optimal
-tetap disarankan Colab GPU T4 (Opsi A) dengan `--imgsz 640 --epochs 50`.
-
----
-
-## Setelah Training: Pakai di Prototype
-
-1. Copy file `best.pt` ke folder prototype (atau simpan di mana saja)
-2. Set environment variable:
+Konversi COCO ke YOLO:
 
 ```powershell
-# PowerShell
-$env:SGS_YOLO_WEIGHTS = "D:\Project\Smart Gate System\Tugas Citra Digital\prototype\runs\detect\train\weights\best.pt"
-
-# Atau permanent (User scope)
-[Environment]::SetEnvironmentVariable("SGS_YOLO_WEIGHTS", "D:\...\best.pt", "User")
+python tools/convert_coco_to_yolo.py
 ```
 
-3. Restart Flask app:
-```bash
-python run.py
+Dataset hasil konversi berada di `datasets/detection/yolo_format/`. Saat
+menggabungkan dataset, pastikan nama file tidak bentrok, setiap gambar memiliki
+label dengan nama yang sama, dan split validasi/test tidak bocor ke train.
+
+### Data dari internet
+
+`tools/fetch_samples.py` mengambil contoh dari Wikimedia Commons, menyimpan
+atribusi, dan memisahkan data positif (plat Indonesia) dari data negatif
+(bukan plat). Jalankan dengan:
+
+```powershell
+python tools/fetch_samples.py
 ```
 
-4. Cek status di `/api/health` atau dashboard — harus muncul `"backend": "yolo"`
+Periksa hasil manual sebelum dipakai training. Data web dapat memiliki lisensi,
+resolusi, framing, atau label yang tidak sesuai. Daftar sumber dan lisensi wajib
+dipertahankan di [`dataset_extra/SOURCES.md`](dataset_extra/SOURCES.md).
+Jangan menggunakan gambar berhak cipta tanpa izin atau menghapus atribusinya.
 
----
+## 2. Anotasi dan Augmentasi
 
-## Evaluasi Model
+Anotasi menggunakan format YOLO detection:
 
-### Evaluasi Deteksi (mAP) pada `datasets/detection/`
-
-```bash
-# Convert COCO ke YOLO format dulu (script terpisah), lalu:
-yolo val model=runs/detect/train/weights/best.pt data=datasets/detection/data.yaml
+```text
+class_id center_x center_y width height
 ```
 
-### Evaluasi OCR (End-to-End)
+Semua koordinat dinormalisasi ke 0--1. Kotak mencakup seluruh bidang plat,
+bukan hanya beberapa karakter. Data dengan plat sangat terpotong, tertutup,
+atau tidak dapat diverifikasi diberi label `bad`/dikeluarkan dari validasi,
+bukan dipaksa menjadi label positif.
 
-```bash
-# Gunakan script eval_real.py yang sudah ada
+Augmentasi yang relevan:
+
+- perubahan brightness/contrast dan HSV untuk siang, malam, dan lampu gate;
+- blur ringan dan noise untuk simulasi CCTV;
+- rotasi/perspektif kecil untuk kamera miring;
+- crop dan resize yang mempertahankan karakter plat;
+- pantulan/silau hanya sebagai variasi tambahan, bukan pengganti foto nyata.
+
+Hindari flip vertikal, distorsi ekstrem, atau augmentasi yang membuat bentuk
+plat tidak realistis. Pisahkan kendaraan yang sama antar split agar metrik tidak
+terlihat tinggi karena kebocoran frame.
+
+## 3. Training YOLO
+
+### GPU/Colab
+
+```powershell
+pip install ultralytics
+python train_yolo.py --data dataset_merged/data.yaml --epochs 50 `
+  --imgsz 640 --batch 16 --device 0 --name smartgate-gpu
+```
+
+### CPU lokal
+
+```powershell
+python train_yolo.py --data dataset_merged/data.yaml --epochs 15 `
+  --imgsz 416 --batch 8 --device cpu --patience 5 --name smartgate
+```
+
+CPU pada laptop i5-8250U berjalan sangat lambat. Untuk training panjang,
+gunakan GPU. `best.pt` dipilih berdasarkan metrik validasi, bukan sekadar epoch
+terakhir.
+
+### Hasil yang sudah tercatat
+
+Run awal `smartgate` (15 epoch, `imgsz=416`, CPU) menghasilkan kira-kira:
+
+| Metrik | Nilai |
+| --- | ---: |
+| Precision | 0,714 |
+| Recall | 0,668 |
+| mAP50 | 0,716 |
+| mAP50-95 | 0,435 |
+
+Run `smartgate-full` belum selesai. File hasil yang tersedia baru 4 epoch; nilai
+terbaik sementara pada epoch 2 adalah precision 0,8280, recall 0,5561, mAP50
+0,6671, dan mAP50-95 0,3737. Nilai ini **bukan hasil final** dan tidak boleh
+dipakai sebagai klaim performa produksi.
+
+Artefak training:
+
+```text
+runs/detect/runs/detect/smartgate/
+├── results.csv
+└── weights/best.pt
+runs/detect/runs/detect/smartgate-full/
+├── results.csv
+└── weights/best.pt
+```
+
+Halaman [`/training`](http://localhost:5001/training) menampilkan status epoch,
+loss, precision, recall, mAP, dan plot yang tersedia.
+
+## 4. Evaluasi
+
+Validasi detektor:
+
+```powershell
+yolo val model=runs/detect/runs/detect/smartgate/weights/best.pt `
+  data=dataset_merged/data.yaml
+```
+
+Evaluasi pipeline OCR:
+
+```powershell
 python tools/eval_real.py --part both --limit 200
 ```
 
----
+Laporkan sedikitnya precision, recall, mAP50, mAP50-95, plate accuracy,
+character error rate (CER), dan latency. Bedakan metrik deteksi dari metrik
+OCR: mAP tidak berarti teks plat pasti terbaca benar.
 
-## Tips Training
+## 5. Memakai Bobot di Prototype
 
-| Parameter | Rekomendasi | Catatan |
-|-----------|-------------|---------|
-| Model base | `yolov8n.pt` (nano) | Cepat, cukup untuk plat. Naik ke `yolov8s.pt` kalau butuh akurasi lebih |
-| Epochs | 50-100 | Early stopping `patience=20` akan berhenti otomatis |
-| Image size | 640 | Standar YOLO. Naik ke 1280 kalau plat sangat kecil |
-| Batch | 16 (GPU 8GB) | Turunkan kalau OOM |
-| Augmentasi | Default YOLO sudah cukup | Mosaic, mixup, HSV, flip, dll otomatis aktif |
+```powershell
+$env:SGS_YOLO_WEIGHTS = "D:\Project\Smart Gate System\Tugas Citra Digital\prototype\runs\detect\runs\detect\smartgate\weights\best.pt"
+python run.py
+```
 
----
+Jika `SGS_YOLO_WEIGHTS` tidak diisi, prototype otomatis mencari
+`runs/detect/runs/detect/smartgate/weights/best.pt`. Hasil YOLO tetap melewati
+gerbang confidence, rasio plat, tekstur, dan jumlah glyph; kotak yang hanya
+menyerupai gril/emblem tidak diteruskan ke OCR.
 
-## Troubleshooting
+Jalur YOLO hanya menerima `class_id=0` karena dataset saat ini hanya memiliki
+kelas `number-plate`. Kandidat juga wajib memiliki rasio lebar/tinggi 1,4--5,0
+dan luas maksimal 20% frame. Rentang ini menjaga plat motor (sekitar 1,5--3,2)
+tetap diterima, tetapi menolak box bodi motor atau box yang terlalu memanjang.
+NMS YOLO tetap digunakan, lalu kandidat diurutkan berdasarkan confidence
+sebelum jumlah kandidat dibatasi.
 
-| Masalah | Solusi |
-|---------|--------|
-| `Access denied` install pip | Pakai `python -m pip install --user` atau buat venv |
-| CUDA out of memory | Turunkan `batch` ke 8 atau 4 |
-| mAP rendah | Naikkan `epochs`, pakai model `yolov8s.pt`/`yolov8m.pt`, perbanyak data |
-| Plat tidak terdeteksi malam | Tambah augmentasi `hsv_h`, `hsv_s`, `hsv_v` di training |
+Pada webcam, detector secara default hanya memproses ROI bawah
+`0.05,0.35,0.95,1.0` (x1,y1,x2,y2) untuk mengurangi false positive jaket/wajah.
+ROI dapat dikalibrasi dengan `SGS_DETECTION_ROI`. Koreksi gamma `1.15` dan
+CLAHE ringan diterapkan khusus pada input detector; gambar asli tetap dipakai
+untuk snapshot dan crop OCR. Nilai gamma dapat diatur lewat
+`SGS_DETECTION_GAMMA` (nilai lebih besar menggelapkan frame overexposed).
 
----
+Periksa `http://localhost:5001/api/health`. Backend harus menunjukkan `yolo`
+bila bobot berhasil dimuat. Jika bobot tidak tersedia, prototype memakai
+deteksi klasik OpenCV sebagai fallback; fallback ini lebih rentan terhadap
+silau, pantulan monitor, dan objek terang di background.
 
-## File Penting
+## 6. Pipeline OCR Setelah Deteksi
 
-- `train_yolo.py` — Script training CLI
-- `plat-nomor/data.yaml` — Config dataset YOLO
-- `app/detect_yolo.py` — Backend YOLO di prototype (auto-load via `SGS_YOLO_WEIGHTS`)
-- `tools/eval_real.py` — Evaluasi end-to-end (deteksi + OCR)
+Deteksi plat tidak langsung membuka gate. Crop kandidat diproses melalui:
+
+1. ROI dan pemilihan kendaraan terdekat;
+2. `drop_swallowed` dan deduplikasi kandidat;
+3. deglare, CLAHE, morphology, upscale, dan unsharp mask;
+4. PaddleOCR recognizer-only (EasyOCR menjadi fallback bila PaddleOCR belum terpasang) dengan allowlist `A-Z0-9`;
+5. padding crop 8% horizontal/12% vertikal, retry deglare, adaptive threshold, dan dua ukuran enhancement;
+6. voting/cache hasil OCR dan validasi struktur NRKB.
+
+Retry dibatasi dan model di-warm-up agar latency tidak membengkak. Test pipeline
+terakhir mencakup normalisasi NRKB, ROI, pemilihan kendaraan, retry OCR, dan
+fusi hasil.
+
+Aturan NRKB digunakan sebagai **skor tambahan**, bukan kebenaran tunggal:
+
+- prefix 1--3 huruf;
+- nomor urut 1--4 digit dan digit pertamanya bukan `0`;
+- suffix 0--3 huruf;
+- konteks posisi membedakan `B/8`, `6/G`, `1/I`, `O/0`, `I/1`, `L/1`, `S/5`, `T/7`, `A/4`, `D/0`, `V/U`, `W/VV`, `X/XX`, `Z/2`.
+
+Referensi struktur nomor: [Bapenda Jawa Barat](https://bapenda.jabarprov.go.id/2017/10/24/kenali-penomoran-kendaraan-bermotor/).
+
+## 7. Pantulan dan Kasus Sulit
+
+`deglare` melakukan inpainting pada highlight yang jenuh lalu CLAHE. Nilai
+`SGS_CLAHE_CLIP_LIMIT` dapat diturunkan untuk menekan moire layar. Ini
+membantu pantulan lampu, tetapi tidak menjamin keberhasilan ketika kamera
+merekam foto kendaraan dari layar monitor. Moire, perspektif layar, dan
+fragmen karakter dapat membuat satu plat terpecah menjadi beberapa kontur.
+
+Untuk deployment:
+
+- kalibrasikan ROI per kamera;
+- gunakan YOLO sebagai detector utama;
+- ambil foto kendaraan langsung, bukan foto dari monitor;
+- simpan frame gagal yang sudah dikonfirmasi satpam sebagai data evaluasi;
+- jangan menurunkan ambang sampai sistem membuka kendaraan yang salah.
+
+## 8. Checklist Sebelum Deployment
+
+- [ ] Tidak ada duplikasi kendaraan antar train/valid/test.
+- [ ] Semua gambar valid memiliki label yang benar.
+- [ ] Data web memiliki atribusi dan sudah ditinjau manual.
+- [ ] `best.pt` berasal dari run yang selesai dan tervalidasi.
+- [ ] Precision/false accept diuji pada kendaraan yang tidak terdaftar.
+- [ ] ROI dan ukuran minimum dikalibrasi untuk kamera gate.
+- [ ] Gagal OCR menghasilkan alert satpam, bukan auto-open.
+- [ ] Snapshot dan keputusan tersimpan di audit log.

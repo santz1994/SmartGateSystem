@@ -18,17 +18,29 @@ import re
 from functools import lru_cache
 from typing import Any
 
+from . import config
 from .pipeline import _cv2, _np, split_rows
 
 CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 GLYPH_SIZE = 32
 
-# Format plat Indonesia: 1-2 huruf, 1-4 angka, 0-3 huruf. Kelas angka sengaja
-# hanya memuat huruf yang sering salah baca sebagai angka (O/I/Z/S) supaya 'B'
-# di prefix tidak ikut dikoreksi jadi '8'.
-_PLATE_RE = re.compile(r"^([A-Z0-9]{1,2}?)([0-9OIZS]{1,4})([A-Z0-9]{0,3})$")
-_TO_DIGIT = str.maketrans({"O": "0", "I": "1", "Z": "2", "S": "5", "B": "8", "G": "6"})
-_TO_ALPHA = str.maketrans({"0": "O", "1": "I", "2": "Z", "5": "S", "8": "B", "6": "G"})
+# Struktur NRKB (Perkapolri 5/2012 — bapenda.jabarprov.go.id/2017/10/24/kenali-
+# penomoran-kendaraan-bermotor/):
+#   [kode wilayah 1-3 huruf][nomor urut 1-4 angka][seri 0-3 huruf]
+# Golongan nomor urut: 1-1999 mobil penumpang, 2000-6999 sepeda motor,
+# 7000-7999 bus, 8000-8999 barang, 9000-9999 khusus.
+# Struktur inilah pemutus sengketa B/8, 6/G, 1/I: huruf di blok huruf,
+# angka di blok angka — 'I' di tengah berarti '1', '8' di depan berarti 'B'.
+_TO_DIGIT = str.maketrans({
+    "O": "0", "I": "1", "L": "1", "Z": "2", "S": "5", "B": "8",
+    "G": "6", "T": "7", "A": "4", "D": "0",
+})
+_TO_ALPHA = str.maketrans({
+    "0": "O", "1": "I", "2": "Z", "4": "A", "5": "S", "6": "G",
+    "7": "T", "8": "B",
+})
+_AMBIGUOUS = set("OIZSBG012568")  # pasangan huruf-angka yang sering tertukar
+NUMBER_GROUPS = ((1, 1999, "car"), (2000, 6999, "motorcycle"), (7000, 8999, "truck"), (9000, 9999, "custom"))
 
 _FONT_CANDIDATES = (
     r"C:\Windows\Fonts\arialbd.ttf",
@@ -38,18 +50,61 @@ _FONT_CANDIDATES = (
 )
 
 
-def normalize_plate(text: str) -> str:
-    """Rapikan hasil OCR: buang non-alfanumerik + koreksi karakter ambigu.
+def _char_scores(char: str) -> tuple[float, float]:
+    """(skor di blok huruf, skor di blok angka) untuk satu karakter."""
+    if char in _AMBIGUOUS:
+        return 0.6, 0.6  # bisa salah baca dua arah (B/8, 6/G, 1/I)
+    return (1.0, 0.2) if char.isalpha() else (0.2, 1.0)
 
-    Koreksi hanya diterapkan pada blok yang sesuai posisinya, jadi ``B 1234 XYZ``
-    tetap ``B1234XYZ`` dan bukan ``81234XYZ``.
+def number_group(text: str) -> int | None:
+    """Nomor urut NRKB dari teks plat (blok angka pertama)."""
+    compact = re.sub(r"[^A-Z0-9]", "", (text or "").upper())
+    match = re.match(r"^[A-Z]{1,3}([0-9]{1,4})", compact)
+    if not match or match.group(1).startswith("0"):
+        return None
+    return int(match.group(1))
+
+def number_fits_class(text: str, vehicle_class: str | None) -> bool:
+    """Nomor urut sesuai golongan kendaraan (Perkapolri 5/2012)?"""
+    number = number_group(text)
+    if number is None or not vehicle_class:
+        return False
+    return any(key == vehicle_class and low <= number <= high for low, high, key in NUMBER_GROUPS)
+
+def normalize_plate(text: str) -> str:
+    """Rapikan hasil OCR memakai struktur NRKB — pemutus sengketa B/8, 6/G, 1/I.
+
+    Semua pemecahan panjang blok dicoba (kode wilayah 1-3, nomor urut 1-4,
+    seri 0-3); skor tertinggi menang: karakter sesuai bloknya bernilai penuh,
+    karakter ambigu (B/8, 6/G, 1/I, ...) bernilai setengah di kedua blok, dan
+    blok angka 3-4 digit (lazim) diberi bonus.
     """
     compact = re.sub(r"[^A-Z0-9]", "", (text or "").upper())
-    match = _PLATE_RE.match(compact)
-    if not match:
+    if len(compact) < 2:
         return compact
-    prefix, digits, suffix = match.groups()
-    return prefix.translate(_TO_ALPHA) + digits.translate(_TO_DIGIT) + suffix.translate(_TO_ALPHA)
+    best_score, best_text = -1.0, compact
+    for prefix_len in (1, 2, 3):
+        for suffix_len in (0, 1, 2, 3):
+            digit_len = len(compact) - prefix_len - suffix_len
+            if not 1 <= digit_len <= 4:
+                continue
+            prefix = compact[:prefix_len]
+            digits = compact[prefix_len : prefix_len + digit_len]
+            suffix = compact[prefix_len + digit_len :]
+            score = sum(_char_scores(c)[0] for c in prefix + suffix)
+            score += sum(_char_scores(c)[1] for c in digits)
+            score += 0.5 * digit_len
+            if score > best_score:
+                best_score = score
+                best_text = "".join(
+                    (prefix.translate(_TO_ALPHA), digits.translate(_TO_DIGIT), suffix.translate(_TO_ALPHA))
+                )
+    return best_text
+
+
+def koreksi_karakter_plat(teks_ocr: str) -> str:
+    """Koreksi karakter ambigu berdasarkan blok NRKB, bukan penggantian global."""
+    return normalize_plate(teks_ocr)
 
 
 # --- Atlas template -----------------------------------------------------------
@@ -231,20 +286,55 @@ def _read_template_multiline(crop: Any) -> tuple[str, float]:
 def _paddle_reader():
     from paddleocr import PaddleOCR
 
-    return PaddleOCR(use_angle_cls=False, lang="en", show_log=False)
+    try:
+        return PaddleOCR(
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+            lang="en",
+        )
+    except (TypeError, ValueError):
+        # Kompatibel dengan PaddleOCR 2.x yang masih memakai API lama.
+        return PaddleOCR(use_angle_cls=False, lang="en", show_log=False)
 
 
 def _read_paddle(crop: Any) -> tuple[str, float]:
-    result = _paddle_reader().ocr(crop, cls=False)
-    lines = result[0] if result else None
-    if not lines:
+    reader = _paddle_reader()
+    if hasattr(reader, "predict"):
+        result = reader.predict(crop)
+    else:
+        legacy = reader.ocr(crop, cls=False)
+        lines = legacy[0] if legacy else None
+        if not lines:
+            return "", 0.0
+        text = "".join(item[1][0] for item in lines)
+        confidence = float(sum(item[1][1] for item in lines) / len(lines))
+        return normalize_plate(text), round(confidence, 4)
+    if not result:
         return "", 0.0
-    text = "".join(item[1][0] for item in lines)
-    confidence = float(sum(item[1][1] for item in lines) / len(lines))
+    texts: list[str] = []
+    confidences: list[float] = []
+    for page in result:
+        data = getattr(page, "json", None)
+        if callable(data):
+            data = data()
+        if isinstance(data, str):
+            import json
+            data = json.loads(data)
+        data = data or {}
+        ocr_res = data.get("res", data) if isinstance(data, dict) else {}
+        texts.extend(str(value) for value in ocr_res.get("rec_texts", []))
+        confidences.extend(float(value) for value in ocr_res.get("rec_scores", []))
+    if not texts:
+        return "", 0.0
+    text = "".join(texts)
+    confidence = sum(confidences) / len(confidences) if confidences else 0.0
     return normalize_plate(text), round(confidence, 4)
 
 
 # --- Backend: EasyOCR ---------------------------------------------------------
+
+_PLATE_ALLOW = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 @lru_cache(maxsize=1)
 def _easy_reader():
@@ -254,17 +344,54 @@ def _easy_reader():
 
 def _read_easyocr(crop: Any) -> tuple[str, float]:
     np = _np()
-    results = _easy_reader().readtext(crop)
+    reader = _easy_reader()
+    # Jalur cepat: recognizer saja. Deteksi (CRAFT) dilewati karena crop sudah
+    # dipastikan pita teks plat oleh pipeline — hemat ~60% waktu. allowlist A-Z0-9
+    # sekaligus mencegah karakter di luar format plat.
+    fast = reader.recognize(crop, allowlist=_PLATE_ALLOW, detail=1)
+    if fast:
+        text = "".join(item[1] if len(item) == 3 else item[0] for item in fast)
+        conf = float(np.mean([item[2] if len(item) == 3 else item[1] for item in fast]))
+        if len(re.sub(r"[^A-Z0-9]", "", text.upper())) >= 3 and conf >= 0.3:
+            return normalize_plate(text), round(min(conf, 0.99), 4)
+
+    # Fallback: multi-baris (plat truk) atau hasil lemah -> deteksi penuh.
+    results = reader.readtext(
+        crop,
+        allowlist=_PLATE_ALLOW,
+        paragraph=False,
+        width_ths=0.9,
+        link_threshold=0.2,
+        mag_ratio=1.5,
+    )
+    if not results:
+        results = reader.readtext(
+            crop,
+            allowlist=_PLATE_ALLOW,
+            paragraph=True,
+            width_ths=0.9,
+            link_threshold=0.2,
+            mag_ratio=1.5,
+        )
     if not results:
         return "", 0.0
     # Plat 2 baris = 2 kotak setinggi sebanding; baris tanggal/tambahan dibuang.
     boxes = []
-    for points, text, confidence in results:
+    for item in results:
+        if len(item) == 3:
+            points, text, confidence = item
+        elif len(item) == 2:
+            points, text = item
+            confidence = 0.5
+        else:
+            continue
         pts = np.asarray(points, dtype="float32")
         height = float(pts[:, 1].max() - pts[:, 1].min())
         baseline = float(pts[:, 1].max())
         left = float(pts[:, 0].min())
         boxes.append((baseline, left, height, float(confidence), text))
+    if not boxes:
+        return "", 0.0
     max_height = max(b[2] for b in boxes)
     rows = [b for b in boxes if b[2] >= 0.6 * max_height]
     if not rows:
@@ -275,15 +402,103 @@ def _read_easyocr(crop: Any) -> tuple[str, float]:
     confidence = float(np.mean([b[3] for b in rows]))
     return text, round(min(confidence, 0.99), 4)
 
+
+def _enhance_ocr_crop(crop: Any) -> Any:
+    """Pertegas suffix tipis tanpa mengganti crop asli untuk audit."""
+    cv2, np = _cv2(), _np()
+    if getattr(crop, "size", 0) == 0:
+        return crop
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    scale = max(2.0, 120.0 / max(gray.shape[0], 1))
+    gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    clahe = cv2.createCLAHE(clipLimit=1.8, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+    blur = cv2.GaussianBlur(enhanced, (0, 0), 1.2)
+    sharpened = cv2.addWeighted(enhanced, 1.5, blur, -0.5, 0)
+    adaptive = cv2.adaptiveThreshold(
+        sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 7
+    )
+    return cv2.cvtColor(adaptive, cv2.COLOR_GRAY2BGR)
+
+_ROBUST_CACHE: dict[tuple[str, bytes], tuple[str, float, str]] = {}
+
+def _looks_like_plate(text: str) -> bool:
+    compact = re.sub(r"[^A-Z0-9]", "", (text or "").upper())
+    return bool(re.fullmatch(r"[A-Z]{1,3}[1-9][0-9]{0,3}[A-Z]{0,3}", compact))
+
+def read_plate_robust(crop: Any, vehicle_class: str | None = None) -> tuple[str, float, str]:
+    """Baca plat dengan strategi ulang: deglare + zoom + enhance, pilih terbaik.
+
+    Skor per pembacaan = (format plat, golongan NRKB cocok kelas kendaraan,
+    keyakinan) — sengketa B/8, 6/G, 1/I diputus :func:`normalize_plate` sesuai
+    struktur NRKB. Berhenti awal bila valid + conf >= 0.80 atau dua varian
+    sepakat. Hasil di-cache per crop: auto-scan frame sama jadi instan.
+    """
+    from . import pipeline
+
+    cache_key = (vehicle_class or "", crop.tobytes())
+    cached = _ROBUST_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    variants = [
+        crop,
+        pipeline.deglare(crop),  # pantulan cahaya / highlight jenuh
+        pipeline.enhance_plate(crop, 160),
+        pipeline.enhance_plate(crop, 240),
+        _enhance_ocr_crop(crop),
+    ]
+    best = ("", 0.0, "")
+    best_score = (-1, -1, -1.0)
+    prev_text: str | None = None
+    for variant in variants:
+        if getattr(variant, "size", 0) == 0:
+            continue
+        text, confidence, backend = read_plate(variant)
+        valid = 1 if _looks_like_plate(text) else 0
+        fits = 1 if number_fits_class(text, vehicle_class) else 0
+        score = (valid, fits, confidence)
+        if score > best_score:
+            best_score, best = score, (text, confidence, backend)
+        if valid and confidence >= 0.80:
+            break
+        if prev_text is not None and text and text == prev_text and valid:
+            break
+        prev_text = text
+
+    if len(_ROBUST_CACHE) >= 32:
+        _ROBUST_CACHE.pop(next(iter(_ROBUST_CACHE)))
+    _ROBUST_CACHE[cache_key] = best
+    return best
+
 @lru_cache(maxsize=1)
 def active_backend() -> str:
     import importlib.util
 
+    if config.OCR_BACKEND in {"paddleocr", "easyocr", "template_match"}:
+        requested = config.OCR_BACKEND
+    else:
+        requested = "paddleocr"
+    if requested == "paddleocr" and importlib.util.find_spec("paddleocr"):
+        return "paddleocr"
+    if requested == "easyocr" and importlib.util.find_spec("easyocr"):
+        return "easyocr"
     if importlib.util.find_spec("paddleocr"):
         return "paddleocr"
     if importlib.util.find_spec("easyocr"):
         return "easyocr"
     return "template_match"
+
+def warmup() -> None:
+    """Muat model OCR di background saat server start — scan pertama tidak lambat."""
+    try:
+        backend = active_backend()
+        if backend == "easyocr":
+            _easy_reader()
+        elif backend == "paddleocr":
+            _paddle_reader()
+    except Exception:  # noqa: BLE001 - warmup gagal jangan menahan server
+        pass
 
 def read_plate(crop: Any) -> tuple[str, float, str]:
     """Baca plat dari crop yang sudah di-deskew. -> (teks, keyakinan, backend)."""

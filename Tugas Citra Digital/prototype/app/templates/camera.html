@@ -10,12 +10,23 @@
       secara manual atau otomatis. Setiap frame melewati pipeline penuh:
       deteksi plat → pilih kendaraan terdekat → OCR → fusi → keputusan.
     </p>
-    <video id="cam-video" autoplay playsinline muted class="snapshot"></video>
+    <div class="cam-stage">
+      <video id="cam-video" autoplay playsinline muted class="snapshot"></video>
+      <canvas id="cam-overlay"></canvas>
+    </div>
     <canvas id="cam-canvas" hidden></canvas>
     <p>
       <button id="cam-start" type="button">Aktifkan Kamera</button>
       <button id="cam-stop" type="button">Matikan</button>
       <button id="cam-scan" type="button">Scan &amp; Simpan Log</button>
+    </p>
+    <p>
+      <button id="cam-plate-toggle" type="button" aria-pressed="true">Plat: Aktif</button>
+      <button id="cam-sticker-toggle" type="button" aria-pressed="true">Stiker: Aktif</button>
+    </p>
+    <p class="muted small">
+      Nonaktifkan pembacaan yang tidak diperlukan untuk menghindari hasil OCR/dekode
+      yang salah pada frame tertentu.
     </p>
     <p>
       <label><input type="checkbox" id="cam-auto"> Auto scan</label>

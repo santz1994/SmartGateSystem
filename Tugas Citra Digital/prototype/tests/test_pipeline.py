@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app import fusion, ocr, pipeline, simulate  # noqa: E402
+from app import fusion, ocr, pipeline, simulate, sticker  # noqa: E402
 
 PASSED = 0
 
@@ -30,15 +30,31 @@ def test_normalize_plate() -> None:
         "B 1234 XYZ": "B1234XYZ",
         "b1234xyz": "B1234XYZ",
         "B-1234-XYZ": "B1234XYZ",
-        "8 1234 XYZ": "B1234XYZ",  # B terbaca 8
-        "BI234XYZ": "B1234XYZ",  # 1 terbaca I
+        "8 1234 XYZ": "B1234XYZ",  # 8 di blok huruf depan = B
+        "BI234XYZ": "B1234XYZ",  # I di blok angka = 1
         "D 5678 ABC": "D5678ABC",
-        "B 9O12 QWE": "B9012QWE",  # O terbaca di blok angka
+        "B 9O12 QWE": "B9012QWE",  # O di blok angka = 0
+        "B1G34XYZ": "B1634XYZ",  # G di blok angka = 6
+        "B1234X6": "B1234XG",  # 6 di blok huruf belakang = G
+        "81257PR": "B1257PR",  # 8 di prefix dan 5 di angka
+        "AA5O45YN": "AA5045YN",  # O di blok angka
+        "B19990G": "B1999OG",  # 0 di suffix
+        "DD 1223 MG": "DD1223MG",
+        "AA 5045 YN": "AA5045YN",
         "": "",
     }
     for raw, expected in cases.items():
         got = ocr.normalize_plate(raw)
         check(f"{raw!r} -> {expected}", got == expected, f"(dapat {got!r})")
+
+def test_number_fits_class() -> None:
+    print("number_fits_class (golongan NRKB)")
+    check("5045 = motor", ocr.number_fits_class("AA5045YN", "motorcycle"))
+    check("5045 bukan mobil", not ocr.number_fits_class("AA5045YN", "car"))
+    check("1257 = mobil", ocr.number_fits_class("L1257PR", "car"))
+    check("8223 = barang/truk", ocr.number_fits_class("B8223XY", "truck"))
+    check("9001 = khusus", ocr.number_fits_class("B9001AA", "custom"))
+    check("tanpa kelas = False", not ocr.number_fits_class("L1257PR", None))
 
 
 def test_fuse_scores() -> None:
@@ -124,7 +140,8 @@ def test_end_to_end() -> None:
     check("plat terdeteksi", len(plates) > 0, f"(dapat {len(plates)})")
 
     if plates:
-        text, confidence, backend = ocr.read_plate(max(plates, key=lambda d: d.confidence).crop)
+        picked = pipeline.pick_primary_plate(plates, image.shape)
+        text, confidence, backend = ocr.read_plate_robust(picked.crop)
         check(f"OCR membaca plat (backend={backend})", text == "B1234XYZ", f"(dapat {text!r} conf={confidence})")
         check("keyakinan OCR wajar", confidence > 0.5, f"(dapat {confidence})")
 
@@ -141,6 +158,19 @@ def test_vote_plate() -> None:
     check("keyakinan = rata-rata pemenang", abs(conf - 0.85) < 1e-6, f"(dapat {conf})")
     text, conf = fusion.vote_plate([(None, 0.0), ("", 0.4)])
     check("tanpa pembacaan -> (None, 0)", text is None and conf == 0.0)
+    text, _ = fusion.vote_plate([("AA5O45YN", 0.9), ("AA5045YN", 0.8)])
+    check("voting menggunakan normalisasi NRKB", text == "AA5045YN", f"(dapat {text!r})")
+
+def test_evidence_fusion() -> None:
+    print("fusi bukti")
+    match = {"plate_number": "B 1234 XYZ", "sticker_code": "STK-1"}
+    check("plat + stiker konsisten", fusion.evidence_matches_vehicle(match, "B1234XYZ", "STK-1"))
+    check("konflik plat ditolak", not fusion.evidence_matches_vehicle(match, "D5678ABC", "STK-1"))
+    check("konflik stiker ditolak", not fusion.evidence_matches_vehicle(match, "B1234XYZ", "STK-2"))
+    sticker, confidence = fusion.vote_sticker(
+        [("STK-1", 0.8), ("STK-1", 0.9), ("STK-2", 0.99)]
+    )
+    check("stiker mayoritas menang", sticker == "STK-1" and abs(confidence - 0.85) < 1e-6)
 
 def test_pick_primary_plate() -> None:
     print("pick_primary_plate")
@@ -157,12 +187,93 @@ def test_pick_primary_plate() -> None:
     check("kendaraan paling depan dipilih", picked is near, f"(dapat {picked.bbox if picked else None})")
     check("daftar kosong -> None", pipeline.pick_primary_plate([], shape) is None)
 
+def test_read_plate_robust() -> None:
+    print("read_plate_robust (enhance + zoom + retry)")
+    frames = simulate.cctv_pair("B 1234 XYZ", None, seed=3)
+    _, image, _ = frames[1]
+    plates = pipeline.detect_plates(image)
+    picked = pipeline.pick_primary_plate(plates, image.shape)
+    if picked is not None:
+        text, conf, backend = ocr.read_plate_robust(picked.crop)
+        check("retry membaca plat valid", text == "B1234XYZ", f"(dapat {text!r} [{backend}])")
+        check("retry keyakinan wajar", conf > 0.5, f"(dapat {conf})")
+
+def test_filter_gate_zone() -> None:
+    print("filter_gate_zone (ROI gate + ukuran minimum)")
+
+    def det(box: tuple[int, int, int, int], conf: float = 0.8) -> pipeline.Detection:
+        x1, y1, x2, y2 = box
+        return pipeline.Detection(kind="plate", quad=[[x1, y1], [x2, y1], [x2, y2], [x1, y2]], confidence=conf)
+
+    shape = (600, 800, 3)  # h, w
+    near = det((300, 400, 500, 460))    # dekat gerbang, lebar 200
+    far = det((400, 100, 470, 125))     # mengekor jauh, lebar 70
+    outside = det((5, 50, 60, 70))      # di luar ROI, lebar 55
+
+    kept = pipeline.filter_gate_zone([near, far, outside], shape)
+    check("hanya kandidat zona & ukuran yang lolos", kept == [near], f"(dapat {[d.bbox for d in kept]})")
+
+    only = det((100, 100, 200, 130))
+    check("kandidat tunggal selalu lolos", pipeline.filter_gate_zone([only], shape) == [only])
+
+def test_yolo_quality_gate() -> None:
+    print("YOLO quality gate")
+    from app import detect_yolo
+
+    check("confidence YOLO aman", 0.05 <= detect_yolo.DEFAULT_CONF <= 0.50)
+    check("kandidat tanpa glyph ditolak", detect_yolo.MIN_PLAUSIBILITY > 0.0)
+    check("box terlalu memanjang ditolak", not detect_yolo._box_geometry_ok(0, 0, 482, 68, (831, 768, 3)))
+    check("plat motor proporsional diterima", detect_yolo._box_geometry_ok(0, 0, 160, 65, (831, 768, 3)))
+    check("plat motor miring diterima", detect_yolo._box_geometry_ok(0, 0, 120, 90, (831, 768, 3)))
+    check("box terlalu luas ditolak", not detect_yolo._box_geometry_ok(0, 0, 500, 400, (831, 768, 3)))
+
+def test_detection_roi() -> None:
+    print("detection ROI dan exposure")
+    np = pipeline._np()
+    image = np.zeros((100, 200, 3), dtype=np.uint8)
+    roi, offset = pipeline.detection_roi(image)
+    check("ROI memotong bagian atas frame", roi.shape[:2] == (65, 180), f"(dapat {roi.shape})")
+    check("offset kembali ke frame asli", offset == (10, 35), f"(dapat {offset})")
+    corrected = pipeline.detection_preprocess(np.full((8, 8, 3), 255, dtype=np.uint8), gamma=1.2)
+    check("preprocess exposure menghasilkan citra", corrected.shape == (8, 8, 3))
+
+def test_plate_text_quality_gate() -> None:
+    print("pemilihan hasil OCR kandidat")
+    check("plat valid DD2760XCL", ocr._looks_like_plate("DD2760XCL"))
+    check("hasil gabungan bukan plat valid", not ocr._looks_like_plate("O02760XCL1029"))
+    check("angka pertama tidak boleh nol", not ocr._looks_like_plate("DD02760XCL"))
+    check("nol setelah digit pertama diperbolehkan", ocr._looks_like_plate("DD2060XCL"))
+    check("nomor urut valid", ocr.number_group("DD2760XCL") == 2760)
+    check("nomor urut nol ditolak", ocr.number_group("DD02760XCL") is None)
+
+def test_signed_sticker_token() -> None:
+    print("signed sticker token")
+    import os
+    previous = os.environ.get("SGS_STICKER_SIGNING_KEY")
+    os.environ["SGS_STICKER_SIGNING_KEY"] = "x" * 32
+    token = sticker.create_signed_token(1, "STK-TEST-001", ttl_seconds=3600)
+    payload = sticker.verify_signed_token(token)
+    check("token valid", payload is not None and payload["c"] == "STK-TEST-001")
+    check("token yang diubah ditolak", sticker.verify_signed_token(token + "x") is None)
+    if previous is None:
+        os.environ.pop("SGS_STICKER_SIGNING_KEY", None)
+    else:
+        os.environ["SGS_STICKER_SIGNING_KEY"] = previous
+
 def main() -> int:
     tests = [
         test_normalize_plate,
+        test_number_fits_class,
         test_fuse_scores,
         test_vote_plate,
+        test_evidence_fusion,
         test_pick_primary_plate,
+        test_filter_gate_zone,
+        test_yolo_quality_gate,
+        test_detection_roi,
+        test_plate_text_quality_gate,
+        test_signed_sticker_token,
+        test_read_plate_robust,
         test_decide,
         test_geometry,
         test_end_to_end,

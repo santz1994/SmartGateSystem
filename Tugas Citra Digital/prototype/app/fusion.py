@@ -48,6 +48,13 @@ class FusionResult:
     fused_score: float
     sources: int
 
+def normalize_evidence_text(text: str | None) -> str | None:
+    import re
+
+    compact = re.sub(r"[^A-Z0-9]", "", (text or "").upper())
+    return compact or None
+
+
 def vote_plate(readings: list[tuple[str | None, float]]) -> tuple[str | None, float]:
     """Voting mayoritas antar-frame: teks paling sering muncul menang.
 
@@ -55,20 +62,49 @@ def vote_plate(readings: list[tuple[str | None, float]]) -> tuple[str | None, fl
     menaikkan akurasi tanpa model yang lebih berat. Kembalikan
     ``(teks_pemenang, keyakinan_rata2_pembacaan_pemenang)``.
     """
-    import re
-
     buckets: dict[str, list[float]] = {}
     for text, confidence in readings:
-        if not text:
-            continue
-        key = re.sub(r"[^A-Z0-9]", "", text.upper())
+        key = normalize_evidence_text(text)
         if key:
+            from .ocr import normalize_plate
+            key = normalize_plate(key)
             buckets.setdefault(key, []).append(float(confidence))
     if not buckets:
         return None, 0.0
     winner = max(buckets, key=lambda k: (len(buckets[k]), sum(buckets[k])))
     votes = buckets[winner]
     return winner, round(sum(votes) / len(votes), 4)
+
+
+def vote_sticker(readings: list[tuple[str | None, float]]) -> tuple[str | None, float]:
+    """Voting stiker antar-frame, dengan bobot frekuensi lalu confidence."""
+    import re
+
+    buckets: dict[str, list[float]] = {}
+    for text, confidence in readings:
+        key = re.sub(r"\s+", "", (text or "").upper()) or None
+        if key:
+            buckets.setdefault(key, []).append(float(confidence))
+    if not buckets:
+        return None, 0.0
+    winner = max(buckets, key=lambda key: (len(buckets[key]), sum(buckets[key])))
+    values = buckets[winner]
+    return winner, round(sum(values) / len(values), 4)
+
+
+def evidence_matches_vehicle(
+    match: Any | None, plate_text: str | None, sticker_code: str | None
+) -> bool:
+    """Tolak hasil OR yang menggabungkan plat dan stiker kendaraan berbeda."""
+    if match is None:
+        return False
+    if plate_text:
+        registered_plate = normalize_evidence_text(match["plate_number"])
+        if registered_plate != normalize_evidence_text(plate_text):
+            return False
+    if sticker_code and match["sticker_code"] != sticker_code:
+        return False
+    return True
 
 
 def fuse_scores(

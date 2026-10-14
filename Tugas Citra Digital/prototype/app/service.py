@@ -59,6 +59,8 @@ class EvaluationResult:
     ocr_backend: str
     vehicle_class: str | None = None
     db_available: bool = True
+    plate_enabled: bool = True
+    sticker_enabled: bool = True
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -83,6 +85,8 @@ class EvaluationResult:
             "vehicle_class": self.vehicle_class,
             "vehicle_class_label": vehicles.label(self.vehicle_class),
             "db_available": self.db_available,
+            "plate_enabled": self.plate_enabled,
+            "sticker_enabled": self.sticker_enabled,
             "thresholds": self.thresholds,
             "frames": [
                 {
@@ -132,23 +136,47 @@ def _save(image: Any, relative: str) -> str:
 
 # --- Pemrosesan satu frame ----------------------------------------------------
 
-def _process_frame(label: str, image: Any, cctv_role: str | None, session_id: str) -> FrameResult:
+def _process_frame(
+    label: str,
+    image: Any,
+    cctv_role: str | None,
+    session_id: str,
+    *,
+    plate_enabled: bool = True,
+    sticker_enabled: bool = True,
+) -> FrameResult:
     stages = pipeline.preprocess(image)
     gray = stages["gray"]
     sharpness = pipeline.laplacian_variance(gray)
 
-    plates = pipeline.detect_plates(image)
-    stickers = pipeline.detect_stickers(image)
+    # Multi-kendaraan: buang plat di luar zona gerbang / terlalu kecil, lalu buang
+    # blob yang menelan kandidat lain — semua secara geometris, SEBELUM OCR.
+    # Sisanya cukup 2 kandidat paling dekat: OCR itu mahal (~0,5 s per bacaan).
+    plates: list[pipeline.Detection] = []
+    if plate_enabled:
+        plates = pipeline.filter_gate_zone(pipeline.detect_plates(image), image.shape)
+        plates = pipeline.drop_swallowed(plates)
+        plates = sorted(plates, key=lambda d: pipeline.closeness(d, image.shape), reverse=True)[:2]
+    stickers = pipeline.detect_stickers(image) if sticker_enabled else []
 
     result = FrameResult(label=label, cctv_role=cctv_role, sharpness=sharpness, stages=stages)
 
     if plates:
-        # Baca semua kandidat dulu: blob palsu bisa lebih "dekat" tapi tidak
-        # terbaca. Pilihan = kendaraan terdekat kamera yang terbaca kredibel.
-        readings = [(det, *ocr.read_plate(det.crop)) for det in plates]
-        credible = [r for r in readings if r[1] and r[2] >= 0.5]
+        # Evaluasi semua kandidat terbatas. Kandidat terdekat tidak selalu
+        # merupakan plat: pada motor, area jalan/roda di bawah frame dapat
+        # terlihat seperti papan terang. Hasil OCR berformat NRKB harus menang
+        # sebelum kedekatan dipakai sebagai pemecah seri.
+        readings = [(det, *ocr.read_plate_robust(det.crop, det.meta.get("vehicle_class"))) for det in plates]
+        valid_readings = [r for r in readings if ocr._looks_like_plate(r[1])]
+        confident_readings = [r for r in valid_readings if r[2] >= 0.5]
+        pool = confident_readings or valid_readings or [r for r in readings if r[1] and r[2] >= 0.5] or readings
         best_plate, text, confidence, backend = max(
-            credible or readings, key=lambda r: pipeline.closeness(r[0], image.shape)
+            pool,
+            key=lambda r: (
+                1 if ocr._looks_like_plate(r[1]) else 0,
+                r[2],
+                pipeline.closeness(r[0], image.shape),
+            ),
         )
         result.plate_text = text or None
         result.plate_confidence = confidence
@@ -187,6 +215,8 @@ def evaluate(
     source: str = "manual",
     session_id: str | None = None,
     persist: bool = True,
+    plate_enabled: bool = True,
+    sticker_enabled: bool = True,
 ) -> EvaluationResult:
     """Proses semua citra satu sesi dan hasilkan keputusan.
 
@@ -195,7 +225,17 @@ def evaluate(
     session_id = session_id or uuid.uuid4().hex[:12]
     thresholds = db.settings()
 
-    frames = [_process_frame(label, image, role, session_id) for label, image, role in images]
+    frames = [
+        _process_frame(
+            label,
+            image,
+            role,
+            session_id,
+            plate_enabled=plate_enabled,
+            sticker_enabled=sticker_enabled,
+        )
+        for label, image, role in images
+    ]
     if not frames:
         raise ValueError("Tidak ada citra untuk diproses")
     _mark_best_frames(frames)
@@ -211,15 +251,18 @@ def evaluate(
     plate_text, plate_confidence = fusion.vote_plate(
         [(f.plate_text, f.plate_confidence) for f in frames]
     )
-    best_sticker = max(frames, key=lambda f: f.sticker_confidence)
-    sticker_code = best_sticker.sticker_code if best_sticker.sticker_confidence > 0 else None
-    sticker_confidence = best_sticker.sticker_confidence
+    sticker_code, sticker_confidence = fusion.vote_sticker(
+        [(f.sticker_code, f.sticker_confidence) for f in frames]
+    )
 
     # --- Pencocokan database (fail-safe: error DB => tidak auto-open) ---
     match = booking = None
     db_available = True
     try:
         match = db.find_vehicle(plate_text, sticker_code)
+        if match is not None and not fusion.evidence_matches_vehicle(match, plate_text, sticker_code):
+            match = None
+            booking = None
         if match is not None and match["requires_booking"] and plate_text:
             booking = db.active_booking(plate_text)
     except sqlite3.Error:
@@ -302,6 +345,8 @@ def evaluate(
         ocr_backend=next((f.ocr_backend for f in frames if f.ocr_backend), ocr.active_backend()),
         vehicle_class=next((f.vehicle_class for f in frames if f.vehicle_class), None),
         db_available=db_available,
+        plate_enabled=plate_enabled,
+        sticker_enabled=sticker_enabled,
     )
 
 

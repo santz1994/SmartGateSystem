@@ -7,10 +7,63 @@ pola warna dari :mod:`app.pipeline`.
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
+import os
+import time
 from functools import lru_cache
 from typing import Any
 
 from .pipeline import Detection, _cv2, _np
+
+TOKEN_PREFIX = "SGS1"
+
+
+def _secret() -> bytes | None:
+    value = os.getenv("SGS_STICKER_SIGNING_KEY", "").encode("utf-8")
+    return value if len(value) >= 32 else None
+
+
+def create_signed_token(
+    vehicle_id: int, sticker_code: str, ttl_seconds: int = 365 * 24 * 3600
+) -> str:
+    secret = _secret()
+    if secret is None:
+        raise RuntimeError("SGS_STICKER_SIGNING_KEY wajib berisi minimal 32 byte")
+    payload = {
+        "v": int(vehicle_id),
+        "c": str(sticker_code),
+        "exp": int(time.time()) + max(int(ttl_seconds), 60),
+        "jti": base64.urlsafe_b64encode(os.urandom(12)).decode().rstrip("="),
+    }
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    ).decode().rstrip("=")
+    signature = hmac.new(secret, encoded.encode(), hashlib.sha256).hexdigest()
+    return f"{TOKEN_PREFIX}.{encoded}.{signature}"
+
+
+def verify_signed_token(token: str) -> dict[str, Any] | None:
+    secret = _secret()
+    parts = (token or "").split(".")
+    if secret is None or len(parts) != 3 or parts[0] != TOKEN_PREFIX:
+        return None
+    encoded, signature = parts[1], parts[2]
+    expected = hmac.new(secret, encoded.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return None
+    try:
+        padding = "=" * (-len(encoded) % 4)
+        payload = json.loads(base64.urlsafe_b64decode((encoded + padding).encode()))
+        if int(payload["exp"]) < int(time.time()):
+            return None
+        if not payload.get("c") or not payload.get("v") or not payload.get("jti"):
+            return None
+        return payload
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return None
 
 
 @lru_cache(maxsize=1)
@@ -30,7 +83,12 @@ def _apriltag_detector():
 def decode_sticker(detection: Detection) -> tuple[str | None, float, str]:
     """Kembalikan (kode, keyakinan, decoder) untuk satu kandidat stiker."""
     if detection.payload:
-        return detection.payload, detection.confidence, detection.meta.get("decoder", "qrcode")
+        payload = verify_signed_token(detection.payload)
+        if payload is not None:
+            return str(payload["c"]), detection.confidence, "qrcode_signed"
+        if detection.payload.startswith(f"{TOKEN_PREFIX}."):
+            return None, 0.0, "qrcode_invalid_signature"
+        return detection.payload, detection.confidence, detection.meta.get("decoder", "qrcode_legacy")
 
     crop = detection.crop
     if crop is None or crop.size == 0:
@@ -42,7 +100,12 @@ def decode_sticker(detection: Detection) -> tuple[str | None, float, str]:
 
     code, confidence = _try_qr(crop)
     if code:
-        return code, confidence, "qrcode"
+        payload = verify_signed_token(code)
+        if payload is not None:
+            return str(payload["c"]), confidence, "qrcode_signed"
+        if code.startswith(f"{TOKEN_PREFIX}."):
+            return None, 0.0, "qrcode_invalid_signature"
+        return code, confidence, "qrcode_legacy"
 
     # Pola warna: tidak menghasilkan kode, hanya sinyal "ada stiker".
     return None, detection.confidence, detection.meta.get("decoder", "color_patch")

@@ -39,6 +39,8 @@ function renderResult(data) {
       <tr><td>Skor fusi</td><td>${data.fused_score.toFixed(2)} (plat ${data.plate_score.toFixed(2)} / stiker ${data.sticker_score.toFixed(2)})</td></tr>
       <tr><td>Sumber citra</td><td>${data.sources}</td></tr>
       <tr><td>Backend OCR</td><td><code>${data.ocr_backend}</code></td></tr>
+      <tr><td>Pembacaan plat</td><td>${data.plate_enabled ? 'Aktif' : 'Nonaktif'}</td></tr>
+      <tr><td>Pembacaan stiker</td><td>${data.sticker_enabled ? 'Aktif' : 'Nonaktif'}</td></tr>
       ${vehicle}
       <tr><td>Session</td><td><code>${data.session_id}</code></td></tr>
     </table>
@@ -128,11 +130,52 @@ document.querySelectorAll('button[data-action]').forEach((button) => {
 const camVideo = $('#cam-video');
 if (camVideo) {
   const canvas = $('#cam-canvas');
+  const overlay = $('#cam-overlay');
   const resultBox = $('#cam-result');
   const statusEl = $('#cam-status');
   let stream = null;
   let timer = null;
   let busy = false;
+  let plateEnabled = true;
+  let stickerEnabled = true;
+
+  function drawDetections(data) {
+    /* Kotak area pembacaan (ROI) + kotak deteksi plat/stiker di atas video. */
+    overlay.width = camVideo.clientWidth;
+    overlay.height = camVideo.clientHeight;
+    const ctx = overlay.getContext('2d');
+    const sx = overlay.width / camVideo.videoWidth;
+    const sy = overlay.height / camVideo.videoHeight;
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+    // ROI zona gerbang (konvensi sama dengan pipeline.filter_gate_zone).
+    ctx.strokeStyle = 'rgba(0, 229, 255, 0.65)';
+    ctx.setLineDash([10, 8]);
+    ctx.lineWidth = 2;
+    ctx.strokeRect(0.10 * overlay.width, 0.25 * overlay.height, 0.80 * overlay.width, 0.75 * overlay.height);
+    ctx.setLineDash([]);
+
+    const colors = { plate: '#22e06a', sticker: '#ffb020' };
+    for (const frame of data.frames || []) {
+      for (const det of frame.detections || []) {
+        const [x1, y1, x2, y2] = det.bbox;
+        ctx.strokeStyle = colors[det.kind] || '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x1 * sx, y1 * sy, (x2 - x1) * sx, (y2 - y1) * sy);
+        ctx.font = '16px sans-serif';
+        const tag = `${det.kind} ${det.confidence.toFixed(2)}`;
+        ctx.fillStyle = colors[det.kind] || '#ffffff';
+        ctx.fillRect(x1 * sx, y1 * sy - 20, ctx.measureText(tag).width + 10, 20);
+        ctx.fillStyle = '#000';
+        ctx.fillText(tag, x1 * sx + 5, y1 * sy - 5);
+      }
+    }
+    if (data.plate_text) {
+      ctx.font = 'bold 22px sans-serif';
+      ctx.fillStyle = '#22e06a';
+      ctx.fillText(`${data.plate_text} (${data.plate_confidence.toFixed(2)})`, 12, overlay.height - 16);
+    }
+  }
 
   const snapBlob = () =>
     new Promise((resolve) => {
@@ -150,10 +193,16 @@ if (camVideo) {
       const blob = await snapBlob();
       const form = new FormData();
       form.append('images', blob, 'camera.jpg');
-      const res = await fetch(`/api/evaluate?persist=${persist ? 1 : 0}`, { method: 'POST', body: form });
+      const params = new URLSearchParams({
+        persist: persist ? '1' : '0',
+        plate: plateEnabled ? '1' : '0',
+        sticker: stickerEnabled ? '1' : '0',
+      });
+      const res = await fetch(`/api/evaluate?${params.toString()}`, { method: 'POST', body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Gagal memindai');
       resultBox.innerHTML = renderResult(data);
+      drawDetections(data);
       statusEl.textContent = `Plat: ${data.plate_text || 'tidak terbaca'} (${data.plate_confidence.toFixed(2)}) — ${data.decision_label}`;
     } catch (err) {
       statusEl.textContent = `Gagal: ${err.message}`;
@@ -184,10 +233,24 @@ if (camVideo) {
       timer = null;
     }
     $('#cam-auto').checked = false;
+    const ctx = overlay.getContext('2d');
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
     statusEl.textContent = 'Kamera dimatikan.';
   });
 
   $('#cam-scan').addEventListener('click', () => scan(true));
+  function updateToggle(button, enabled, label) {
+    button.setAttribute('aria-pressed', String(enabled));
+    button.textContent = `${label}: ${enabled ? 'Aktif' : 'Nonaktif'}`;
+  }
+  $('#cam-plate-toggle').addEventListener('click', (event) => {
+    plateEnabled = !plateEnabled;
+    updateToggle(event.currentTarget, plateEnabled, 'Plat');
+  });
+  $('#cam-sticker-toggle').addEventListener('click', (event) => {
+    stickerEnabled = !stickerEnabled;
+    updateToggle(event.currentTarget, stickerEnabled, 'Stiker');
+  });
   $('#cam-auto').addEventListener('change', (event) => {
     if (event.target.checked) {
       const ms = Number($('#cam-interval').value) || 3000;

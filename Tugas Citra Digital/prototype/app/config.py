@@ -22,10 +22,21 @@ DEFAULTS: dict[str, float] = {
     "low_confidence_floor": 0.60,
     "session_window_seconds": 3.0,
     "multi_camera_bonus": 0.05,
+    "clahe_clip_limit": 2.0,
+    "frame_vote_minimum": 2.0,
 }
 
 # Bobot fusi: stiker adalah *penguat*, bukan syarat.
 FUSION_WEIGHTS = {"plate": 1.0, "sticker": 0.95}
+
+# ``paddleocr`` adalah backend produksi yang direkomendasikan. Set ke
+# ``easyocr`` atau ``template_match`` untuk pengujian/perangkat tanpa model.
+OCR_BACKEND = os.getenv("SGS_OCR_BACKEND", "paddleocr").lower()
+CLAHE_CLIP_LIMIT = float(os.getenv("SGS_CLAHE_CLIP_LIMIT", str(DEFAULTS["clahe_clip_limit"])))
+DETECTION_GAMMA = float(os.getenv("SGS_DETECTION_GAMMA", "1.15"))
+DETECTION_ROI = tuple(
+    float(part) for part in os.getenv("SGS_DETECTION_ROI", "0.05,0.35,0.95,1.0").split(",")
+)
 
 # Batas ukuran upload (MB) untuk foto manual.
 MAX_UPLOAD_MB = 16

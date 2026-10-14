@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import vehicles
+from . import config, vehicles
 
 # --- Ambang internal pipeline (bukan ambang keputusan bisnis) ---
 # Pencarian kontur dibuat permisif (gabungan semua kelas kendaraan); penyaringan
@@ -36,6 +36,47 @@ def _np():
     import numpy as np
 
     return np
+
+
+def detection_preprocess(image: Any, gamma: float | None = None) -> Any:
+    """Redam highlight sebelum detector, tanpa mengubah citra untuk audit/OCR.
+
+    Gamma > 1 menggelapkan frame webcam yang overexposed. CLAHE dibatasi agar
+    pola moire tidak ikut diperkuat secara agresif.
+    """
+    cv2, np = _cv2(), _np()
+    value = float(gamma if gamma is not None else config.DETECTION_GAMMA)
+    value = max(value, 0.1)
+    lut = np.array([((index / 255.0) ** value) * 255 for index in range(256)], dtype=np.uint8)
+    corrected = cv2.LUT(image, lut)
+    lab = cv2.cvtColor(corrected, cv2.COLOR_BGR2LAB)
+    l_ch, a_ch, b_ch = cv2.split(lab)
+    clahe = cv2.createCLAHE(
+        clipLimit=max(min(config.CLAHE_CLIP_LIMIT, 2.5), 0.1), tileGridSize=(8, 8)
+    )
+    return cv2.cvtColor(cv2.merge([clahe.apply(l_ch), a_ch, b_ch]), cv2.COLOR_LAB2BGR)
+
+
+def detection_roi(image: Any) -> tuple[Any, tuple[int, int]]:
+    """Ambil ROI bawah frame dan kembalikan offset koordinat frame asli."""
+    np = _np()
+    h, w = image.shape[:2]
+    x1, y1, x2, y2 = config.DETECTION_ROI
+    x1i, y1i = max(0, int(x1 * w)), max(0, int(y1 * h))
+    x2i, y2i = min(w, int(x2 * w)), min(h, int(y2 * h))
+    if x2i <= x1i or y2i <= y1i:
+        return image, (0, 0)
+    return image[y1i:y2i, x1i:x2i].copy(), (x1i, y1i)
+
+
+def translate_detections(detections: list[Detection], offset: tuple[int, int]) -> list[Detection]:
+    """Kembalikan koordinat hasil detector ROI ke ruang frame asli."""
+    ox, oy = offset
+    if not ox and not oy:
+        return detections
+    for detection in detections:
+        detection.quad = [[x + ox, y + oy] for x, y in detection.quad]
+    return detections
 
 
 @dataclass
@@ -91,7 +132,7 @@ def laplacian_variance(gray: Any) -> float:
 
 # --- Pre-processing -----------------------------------------------------------
 
-def preprocess(image: Any) -> dict[str, Any]:
+def preprocess(image: Any, clahe_clip_limit: float | None = None) -> dict[str, Any]:
     """CLAHE -> bilateral -> grayscale.
 
     Urutan ini penting: CLAHE memperkuat noise, jadi denoising harus *setelah*
@@ -102,7 +143,8 @@ def preprocess(image: Any) -> dict[str, Any]:
 
     lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
     l_ch, a_ch, b_ch = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    clip_limit = clahe_clip_limit if clahe_clip_limit is not None else config.CLAHE_CLIP_LIMIT
+    clahe = cv2.createCLAHE(clipLimit=max(float(clip_limit), 0.1), tileGridSize=(8, 8))
     merged = cv2.merge([clahe.apply(l_ch), a_ch, b_ch])
     stages["clahe"] = cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
 
@@ -120,7 +162,31 @@ def normalize_plate_size(crop: Any, target_height: int = PLATE_TARGET_HEIGHT) ->
     scale = target_height / float(h)
     return cv2.resize(crop, (max(int(round(w * scale)), 1), target_height), interpolation=cv2.INTER_LANCZOS4)
 
-def enhance_plate(crop: Any, target_height: int = 160) -> Any:
+def deglare(crop: Any, clahe_clip_limit: float | None = None) -> Any:
+    """Redam pantulan cahaya (piksel highlight jenuh) lalu rapikan kontras.
+
+    Pantulan lampu/silau membuat sebagian karakter hilang di area putih jenuh.
+    Area tersebut di-inpaint dari tepi sekitarnya, lalu CLAHE meratakan cahaya.
+    """
+    cv2, np = _cv2(), _np()
+    if getattr(crop, "size", 0) == 0:
+        return crop
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    mask = ((gray >= 245) * 255).astype(np.uint8)
+    if not mask.any():
+        return crop
+    fixed = cv2.inpaint(crop, mask, 3, cv2.INPAINT_TELEA)
+    lab = cv2.cvtColor(fixed, cv2.COLOR_BGR2LAB)
+    l_ch, a_ch, b_ch = cv2.split(lab)
+    clip_limit = clahe_clip_limit if clahe_clip_limit is not None else min(
+        config.CLAHE_CLIP_LIMIT + 0.5, 3.0
+    )
+    clahe = cv2.createCLAHE(clipLimit=max(float(clip_limit), 0.1), tileGridSize=(8, 8))
+    return cv2.cvtColor(cv2.merge([clahe.apply(l_ch), a_ch, b_ch]), cv2.COLOR_LAB2BGR)
+
+def enhance_plate(
+    crop: Any, target_height: int = 160, clahe_clip_limit: float | None = None
+) -> Any:
     """Upscale + perbaiki kontras plat untuk inspeksi manual / OCR.
 
     Dipakai saat OCR gagal: satpam tetap bisa membaca plat dari citra yang
@@ -136,7 +202,10 @@ def enhance_plate(crop: Any, target_height: int = 160) -> Any:
 
     lab = cv2.cvtColor(up, cv2.COLOR_BGR2LAB)
     l_ch, a_ch, b_ch = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    clip_limit = clahe_clip_limit if clahe_clip_limit is not None else min(
+        config.CLAHE_CLIP_LIMIT + 1.0, 3.0
+    )
+    clahe = cv2.createCLAHE(clipLimit=max(float(clip_limit), 0.1), tileGridSize=(8, 8))
     merged = cv2.merge([clahe.apply(l_ch), a_ch, b_ch])
     enhanced = cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
 
@@ -146,6 +215,41 @@ def enhance_plate(crop: Any, target_height: int = 160) -> Any:
     blur = cv2.GaussianBlur(enhanced, (0, 0), 3.0)
     return cv2.addWeighted(enhanced, 1.6, blur, -0.6, 0)
 
+def filter_gate_zone(
+    detections: list[Detection],
+    image_shape: Any,
+    roi: tuple[float, float, float, float] = (0.10, 0.25, 0.90, 1.0),
+    min_width_frac: float = 0.35,
+) -> list[Detection]:
+    """Filter multi-kendaraan: hanya plat di zona gerbang & berukuran wajar.
+
+    - **ROI gate** (normalisasi x1,y1,x2,y2): centroid plat harus masuk kotak
+      virtual di depan palang. Plat jalur seberang / latar belakang dibuang.
+    - **Ukuran minimum relatif**: lebar plat >= ``min_width_frac`` x lebar
+      kandidat terlebar (kendaraan mengekor jauh = lebih kecil = dibuang).
+
+    Hanya aktif bila ada >1 kandidat — kandidat tunggal tetap lolos apa adanya
+    (foto manual / sudut bebas). Tiap tahap punya fallback: bila semua gugur,
+    pakai hasil tahap sebelumnya, tidak pernah kosong.
+    """
+    if len(detections) <= 1:
+        return detections
+    h, w = image_shape[:2]
+    rx1, ry1, rx2, ry2 = roi[0] * w, roi[1] * h, roi[2] * w, roi[3] * h
+
+    def centroid(det: Detection) -> tuple[float, float]:
+        x1, y1, x2, y2 = det.bbox
+        return (x1 + x2) / 2, (y1 + y2) / 2
+
+    in_zone = [
+        det for det in detections
+        if rx1 <= centroid(det)[0] <= rx2 and ry1 <= centroid(det)[1] <= ry2
+    ] or detections
+
+    max_width = max(det.bbox[2] - det.bbox[0] for det in in_zone)
+    sized = [det for det in in_zone if det.bbox[2] - det.bbox[0] >= min_width_frac * max_width]
+    return sized or in_zone
+
 def closeness(det: Detection, image_shape: Any) -> float:
     """Skor kedekatan ke kamera: bbox besar + bawah frame = kendaraan terdekat."""
     h, w = image_shape[:2]
@@ -154,16 +258,43 @@ def closeness(det: Detection, image_shape: Any) -> float:
     front = 1.5 if y2 > h * 0.6 else 1.0  # bawah frame = lebih dekat
     return area_ratio * front
 
+def drop_swallowed(detections: list[Detection]) -> list[Detection]:
+    """Buang kandidat yang menelan kandidat lain — box rapat (plat asli) menang."""
+    if len(detections) <= 1:
+        return detections
+
+    def area(det: Detection) -> int:
+        x1, y1, x2, y2 = det.bbox
+        return (x2 - x1) * (y2 - y1)
+
+    kept: list[Detection] = []
+    for det in detections:
+        x1, y1, x2, y2 = det.bbox
+        swallows = False
+        for other in detections:
+            if other is det or area(other) >= area(det):
+                continue
+            ox1, oy1, ox2, oy2 = other.bbox
+            inter = max(0, min(x2, ox2) - max(x1, ox1)) * max(0, min(y2, oy2) - max(y1, oy1))
+            if inter / max(area(other), 1) > 0.8:
+                swallows = True
+                break
+        if not swallows:
+            kept.append(det)
+    return kept
+
 def pick_primary_plate(detections: list[Detection], image_shape: Any) -> Detection | None:
     """Pilih plat kendaraan paling dekat kamera saat ada >1 kandidat.
 
-    Terdekat = bbox terbesar + paling bawah dalam frame. Itu kendaraan yang
-    siap masuk gerbang; plat kendaraan lain diabaikan sampai maju sendiri.
-    Keyakinan deteksi hanya pemecah seri.
+    Kandidat blob yang menelan box lebih rapat dibuang lebih dulu, lalu terdekat
+    = bbox terbesar + paling bawah dalam frame. Itu kendaraan yang siap masuk
+    gerbang; plat kendaraan lain diabaikan sampai maju sendiri. Keyakinan
+    deteksi hanya pemecah seri.
     """
-    if not detections:
+    kept = drop_swallowed(detections)
+    if not kept:
         return None
-    return max(detections, key=lambda det: (closeness(det, image_shape), det.confidence))
+    return max(kept, key=lambda det: (closeness(det, image_shape), det.confidence))
 
 
 # --- Deteksi plat -------------------------------------------------------------
@@ -362,6 +493,10 @@ def plate_texture_ok(crop: Any) -> bool:
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     if gray.size == 0:
         return False
+    # Kotak putih seragam (plat overexposed atau jaket terang) tidak cukup
+    # sebagai bukti plat; OCR terhadapnya hanya menghasilkan false confidence.
+    if float(np.mean(gray > 245)) > 0.82 and float(np.std(gray)) < 32.0:
+        return False
     edges = cv2.Canny(gray, 60, 180)
     h, w = gray.shape
     if float(edges.sum() / 255) / max(h * w, 1) < PLATE_MIN_EDGE_RATIO:
@@ -403,7 +538,7 @@ def plate_plausibility(crop: Any) -> tuple[str, str, int, float]:
     score = 0.6 * aspect_score + 0.4 * count_score
     return key, "vertical" if row_count >= 2 else "horizontal", glyphs, round(score, 4)
 
-def detect_plates(image: Any, max_candidates: int = 4) -> list[Detection]:
+def detect_plates(image: Any, max_candidates: int = 8) -> list[Detection]:
     """Cari kandidat plat.
 
     Backend dipilih otomatis: bila ``app.detect_yolo`` punya bobot YOLO yang
@@ -411,13 +546,61 @@ def detect_plates(image: Any, max_candidates: int = 4) -> list[Detection]:
     tidak, jalur klasik OpenCV di bawah. Pemanggil tidak perlu tahu bedanya.
     """
     from . import detect_yolo
+    detector_image, offset = detection_roi(detection_preprocess(image))
 
     if detect_yolo.available():
-        return detect_yolo.detect(image, max_candidates)
-    return detect_plates_classic(image, max_candidates)
+        # Jika YOLO aktif tetapi semua kandidat gagal quality gate, jangan
+        # menghidupkan fallback klasik: fallback dapat mengembalikan blob
+        # bumper/aspal yang justru sudah ditolak oleh gate YOLO.
+        detections = detect_yolo.detect(detector_image, max_candidates)
+        return translate_detections(detections, offset)
+    detections = detect_plates_classic(detector_image, max_candidates)
+    return translate_detections(detections, offset)
 
 
-def detect_plates_classic(image: Any, max_candidates: int = 4) -> list[Detection]:
+def _merge_fragments(candidates: list[tuple[float, Any]]) -> list[tuple[float, Any]]:
+    """Gabung fragmen teks plat yang berjajar jadi satu kandidat penuh.
+
+    Pada kasus sulit (plat gelap, silau) kontur teks sering pecah per kata.
+    Dua box yang sebaris (y-center dekat) dengan celah horizontal wajar
+    digabung; aspek gabungan harus menyerupai plat agar tidak asal menyatu.
+    """
+    cv2, np = _cv2(), _np()
+    boxes = [box for _, box in candidates]
+    unions: list[Any] = []
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(boxes)):
+            for j in range(i + 1, len(boxes)):
+                a, b = boxes[i], boxes[j]
+                ax1, ay1 = a.min(axis=0)
+                ax2, ay2 = a.max(axis=0)
+                bx1, by1 = b.min(axis=0)
+                bx2, by2 = b.max(axis=0)
+                h_max = max(ay2 - ay1, by2 - by1)
+                if h_max <= 0:
+                    continue
+                centers_near = abs((ay1 + ay2) / 2 - (by1 + by2) / 2) < 0.8 * h_max
+                gap = max(ax1, bx1) - min(ax2, bx2)
+                if not (centers_near and 0 <= gap < 3.0 * h_max):
+                    continue
+                ux1, uy1 = min(ax1, bx1), min(ay1, by1)
+                ux2, uy2 = max(ax2, bx2), max(ay2, by2)
+                aspect = (ux2 - ux1) / max(uy2 - uy1, 1)
+                if not 1.2 <= aspect <= vehicles.DETECT_BOUNDS.aspect_max:
+                    continue
+                union = np.array([[ux1, uy1], [ux2, uy1], [ux2, uy2], [ux1, uy2]], dtype="float32")
+                boxes = [b for k, b in enumerate(boxes) if k not in (i, j)]
+                boxes.append(union)
+                unions.append(union)
+                merged = True
+                break
+            if merged:
+                break
+    return [(0.6, box) for box in unions]
+
+def detect_plates_classic(image: Any, max_candidates: int = 8) -> list[Detection]:
     """Cari kandidat plat dengan morfologi + kontur (klasik, tanpa ML).
 
     Alur: pencarian permisif (semua kelas kendaraan) -> gerbang kualitas
@@ -439,7 +622,7 @@ def detect_plates_classic(image: Any, max_candidates: int = 4) -> list[Detection
 
     frame_area = float(image.shape[0] * image.shape[1])
     candidates: list[tuple[float, Any]] = []
-    for kernel_w, threshold_value in ((17, otsu_global), (19, otsu_center)):
+    for kernel_w, threshold_value in ((17, otsu_global), (19, otsu_center), (31, otsu_global)):
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_w, 5))
         closed = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
         for flag in (cv2.THRESH_BINARY, cv2.THRESH_BINARY_INV):
@@ -452,6 +635,9 @@ def detect_plates_classic(image: Any, max_candidates: int = 4) -> list[Detection
             candidates.extend(_candidates_from_binary(binary, frame_area))
 
         candidates.sort(key=lambda item: item[0], reverse=True)
+
+    candidates.extend(_merge_fragments(candidates))
+    candidates.sort(key=lambda item: item[0], reverse=True)
 
     detections: list[Detection] = []
     kept_quads: list[Any] = []
