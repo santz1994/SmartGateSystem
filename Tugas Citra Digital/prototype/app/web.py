@@ -160,12 +160,14 @@ def create_app() -> Flask:
         def enabled(name: str) -> bool:
             return request.args.get(name, "1").strip().lower() not in {"0", "false", "off"}
 
+        fast = enabled("fast")
         result = service.evaluate(
             images,
             source="manual",
             persist=request.args.get("persist", "1") != "0",
             plate_enabled=enabled("plate"),
             sticker_enabled=enabled("sticker"),
+            fast=fast,
         )
         return jsonify(result.as_dict())
 

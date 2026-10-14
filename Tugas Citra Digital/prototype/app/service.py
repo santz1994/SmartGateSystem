@@ -8,6 +8,8 @@ Alur satu sesi:
 from __future__ import annotations
 
 import sqlite3
+import hashlib
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,6 +17,8 @@ from typing import Any, Iterable
 
 from . import config, db, fusion, ocr, pipeline, sticker, vehicles
 from .fusion import DECISION_ALERT, DECISION_LABEL, PENDING_DECISIONS
+
+_DIAGNOSTIC_LAST_SAVED: tuple[float, str] | None = None
 
 
 @dataclass
@@ -146,6 +150,7 @@ def _process_frame(
     *,
     plate_enabled: bool = True,
     sticker_enabled: bool = True,
+    fast: bool = False,
 ) -> FrameResult:
     stages = pipeline.preprocess(image)
     gray = stages["gray"]
@@ -158,8 +163,8 @@ def _process_frame(
     if plate_enabled:
         plates = pipeline.filter_gate_zone(pipeline.detect_plates(image), image.shape)
         plates = pipeline.drop_swallowed(plates)
-        plates = sorted(plates, key=lambda d: pipeline.closeness(d, image.shape), reverse=True)[:2]
-    stickers = pipeline.detect_stickers(image) if sticker_enabled else []
+        plates = sorted(plates, key=lambda d: pipeline.closeness(d, image.shape), reverse=True)[: (1 if fast else 2)]
+    stickers = pipeline.detect_stickers(image) if sticker_enabled and not fast else []
 
     result = FrameResult(label=label, cctv_role=cctv_role, sharpness=sharpness, stages=stages)
 
@@ -168,7 +173,10 @@ def _process_frame(
         # merupakan plat: pada motor, area jalan/roda di bawah frame dapat
         # terlihat seperti papan terang. Hasil OCR berformat NRKB harus menang
         # sebelum kedekatan dipakai sebagai pemecah seri.
-        readings = [(det, *ocr.read_plate_robust(det.crop, det.meta.get("vehicle_class"))) for det in plates]
+        readings = [
+            (det, *ocr.read_plate_robust(det.crop, det.meta.get("vehicle_class"), fast=fast))
+            for det in plates
+        ]
         valid_readings = [r for r in readings if ocr._looks_like_plate(r[1])]
         confident_readings = [r for r in valid_readings if r[2] >= 0.5]
         pool = confident_readings or valid_readings or [r for r in readings if r[1] and r[2] >= 0.5] or readings
@@ -198,7 +206,7 @@ def _process_frame(
     result.detections = plates + stickers
     detection_conf = max((d.confidence for d in result.detections), default=0.0)
     result.frame_score = pipeline.frame_score(image, detection_conf)
-    if plate_enabled and (
+    if plate_enabled and not fast and (
         not result.plate_text
         or result.plate_confidence < config.DEFAULTS["plat_confidence_threshold"]
     ):
@@ -224,6 +232,7 @@ def evaluate(
     persist: bool = True,
     plate_enabled: bool = True,
     sticker_enabled: bool = True,
+    fast: bool = False,
 ) -> EvaluationResult:
     """Proses semua citra satu sesi dan hasilkan keputusan.
 
@@ -240,6 +249,7 @@ def evaluate(
             session_id,
             plate_enabled=plate_enabled,
             sticker_enabled=sticker_enabled,
+            fast=fast,
         )
         for label, image, role in images
     ]
@@ -256,7 +266,7 @@ def evaluate(
 
     # Voting mayoritas antar-frame: menahan 1 frame buram yang salah baca.
     plate_text, plate_confidence = fusion.vote_plate(
-        [(f.plate_text, f.plate_confidence) for f in frames]
+        [(f.plate_text, f.plate_confidence, f.cctv_role) for f in frames]
     )
     sticker_code, sticker_confidence = fusion.vote_sticker(
         [(f.sticker_code, f.sticker_confidence) for f in frames]
@@ -367,13 +377,24 @@ def _save_stages(frame: FrameResult, session_id: str) -> None:
 
 
 def _save_failed_diagnostics(frame: FrameResult, session_id: str) -> None:
-    """Simpan bukti crop/frame gagal tanpa membuat Auto scan memenuhi disk."""
+    """Simpan bukti gagal dengan deduplikasi, cooldown, dan ring buffer."""
+    global _DIAGNOSTIC_LAST_SAVED
     images = {
         "frame": frame.stages.get("original"),
         "plate_raw": frame.stages.get("plate_raw"),
         "plate_crop": frame.stages.get("plate_crop"),
         "plate_enhanced": frame.stages.get("plate_enhanced"),
     }
+    source = images["frame"]
+    if source is None or getattr(source, "size", 0) == 0:
+        return
+    fingerprint = hashlib.sha1(source.tobytes()).hexdigest()
+    now = time.monotonic()
+    if _DIAGNOSTIC_LAST_SAVED is not None:
+        saved_at, saved_fingerprint = _DIAGNOSTIC_LAST_SAVED
+        if fingerprint == saved_fingerprint or now - saved_at < config.DIAGNOSTIC_COOLDOWN_SECONDS:
+            return
+
     for name, image in images.items():
         if image is None or getattr(image, "size", 0) == 0:
             continue
@@ -382,13 +403,20 @@ def _save_failed_diagnostics(frame: FrameResult, session_id: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(encode_image(image))
         frame.diagnostic_paths.append(f"diag/ocr_failed/{relative}")
+    _DIAGNOSTIC_LAST_SAVED = (now, fingerprint)
 
-    files = sorted(
-        (path for path in config.DIAGNOSTIC_DIR.glob("*") if path.is_file()),
-        key=lambda path: path.stat().st_mtime,
+    bundles: dict[str, list[Path]] = {}
+    for path in config.DIAGNOSTIC_DIR.glob("*"):
+        if path.is_file():
+            bundles.setdefault(path.name.split("_", 1)[0], []).append(path)
+    ordered = sorted(
+        bundles.items(),
+        key=lambda item: max(path.stat().st_mtime for path in item[1]),
+        reverse=True,
     )
-    for path in files[:-config.MAX_DIAGNOSTIC_FILES]:
-        path.unlink(missing_ok=True)
+    for _, paths in ordered[config.MAX_DIAGNOSTIC_BUNDLES:]:
+        for path in paths:
+            path.unlink(missing_ok=True)
 
 
 # --- Tindakan satpam ----------------------------------------------------------

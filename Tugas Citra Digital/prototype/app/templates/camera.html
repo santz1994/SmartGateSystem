@@ -7,8 +7,8 @@
     <h2>Kamera &amp; Auto Scan Plat</h2>
     <p class="muted">
       Aktifkan kamera (webcam / CCTV yang dikenali browser), lalu pindai plat nomor
-      secara manual atau otomatis. Setiap frame melewati pipeline penuh:
-      deteksi plat → pilih kendaraan terdekat → OCR → fusi → keputusan.
+      secara manual atau otomatis. Scan manual memakai pipeline penuh, sedangkan
+      auto scan memakai jalur plat cepat agar kendaraan yang bergerak tidak terlewat.
     </p>
     <div class="cam-stage">
       <video id="cam-video" autoplay playsinline muted class="snapshot"></video>
@@ -32,8 +32,10 @@
       <label><input type="checkbox" id="cam-auto"> Auto scan</label>
       <label>Interval
         <select id="cam-interval">
+          <option value="750" selected>0,75 detik (cepat)</option>
+          <option value="1000">1 detik</option>
           <option value="2000">2 detik</option>
-          <option value="3000" selected>3 detik</option>
+          <option value="3000">3 detik</option>
           <option value="5000">5 detik</option>
         </select>
       </label>

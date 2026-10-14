@@ -434,13 +434,15 @@ def _enhance_ocr_crop(crop: Any) -> Any:
     )
     return cv2.cvtColor(adaptive, cv2.COLOR_GRAY2BGR)
 
-_ROBUST_CACHE: dict[tuple[str, bytes], tuple[str, float, str]] = {}
+_ROBUST_CACHE: dict[tuple[str, str, bytes], tuple[str, float, str]] = {}
 
 def _looks_like_plate(text: str) -> bool:
     compact = re.sub(r"[^A-Z0-9]", "", (text or "").upper())
     return bool(re.fullmatch(r"[A-Z]{1,3}[1-9][0-9]{0,3}[A-Z]{0,3}", compact))
 
-def read_plate_robust(crop: Any, vehicle_class: str | None = None) -> tuple[str, float, str]:
+def read_plate_robust(
+    crop: Any, vehicle_class: str | None = None, *, fast: bool = False
+) -> tuple[str, float, str]:
     """Baca plat dengan strategi ulang: deglare + zoom + enhance, pilih terbaik.
 
     Skor per pembacaan = (format plat, golongan NRKB cocok kelas kendaraan,
@@ -450,18 +452,15 @@ def read_plate_robust(crop: Any, vehicle_class: str | None = None) -> tuple[str,
     """
     from . import pipeline
 
-    cache_key = (vehicle_class or "", crop.tobytes())
+    cache_key = (vehicle_class or "", "fast" if fast else "full", crop.tobytes())
     cached = _ROBUST_CACHE.get(cache_key)
     if cached is not None:
         return cached
 
-    variants = [
-        crop,
-        pipeline.deglare(crop),  # pantulan cahaya / highlight jenuh
-        pipeline.enhance_plate(crop, 160),
-        pipeline.enhance_plate(crop, 240),
-        _enhance_ocr_crop(crop),
-    ]
+    # Jalur normal hanya memakai crop asli dan satu peningkatan kontras.
+    # Varian tambahan mahal; jalankan hanya bila dua percobaan awal tidak
+    # menghasilkan format NRKB yang valid.
+    variants = [crop] if fast else [crop, pipeline.enhance_plate(crop, 160)]
     best = ("", 0.0, "")
     best_score = (-1, -1, -1.0)
     prev_text: str | None = None
@@ -479,6 +478,17 @@ def read_plate_robust(crop: Any, vehicle_class: str | None = None) -> tuple[str,
         if prev_text is not None and text and text == prev_text and valid:
             break
         prev_text = text
+
+    if not fast and not _looks_like_plate(best[0]):
+        for variant in (pipeline.deglare(crop), _enhance_ocr_crop(crop)):
+            text, confidence, backend = read_plate(variant)
+            valid = 1 if _looks_like_plate(text) else 0
+            fits = 1 if number_fits_class(text, vehicle_class) else 0
+            score = (valid, fits, confidence)
+            if score > best_score:
+                best_score, best = score, (text, confidence, backend)
+            if valid and confidence >= 0.80:
+                break
 
     if len(_ROBUST_CACHE) >= 32:
         _ROBUST_CACHE.pop(next(iter(_ROBUST_CACHE)))

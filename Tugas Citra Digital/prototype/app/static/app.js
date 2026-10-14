@@ -186,10 +186,12 @@ if (camVideo) {
 
   const snapBlob = () =>
     new Promise((resolve) => {
-      canvas.width = camVideo.videoWidth;
-      canvas.height = camVideo.videoHeight;
+      const maxWidth = 960;
+      const scale = Math.min(1, maxWidth / camVideo.videoWidth);
+      canvas.width = Math.round(camVideo.videoWidth * scale);
+      canvas.height = Math.round(camVideo.videoHeight * scale);
       canvas.getContext('2d').drawImage(camVideo, 0, 0);
-      canvas.toBlob(resolve, 'image/jpeg', 0.9);
+      canvas.toBlob(resolve, 'image/jpeg', 0.78);
     });
 
   async function scan(persist) {
@@ -203,7 +205,8 @@ if (camVideo) {
       const params = new URLSearchParams({
         persist: persist ? '1' : '0',
         plate: plateEnabled ? '1' : '0',
-        sticker: stickerEnabled ? '1' : '0',
+        sticker: persist && stickerEnabled ? '1' : '0',
+        fast: persist ? '0' : '1',
       });
       const res = await fetch(`/api/evaluate?${params.toString()}`, { method: 'POST', body: form });
       const data = await res.json();
@@ -215,6 +218,7 @@ if (camVideo) {
       statusEl.textContent = `Gagal: ${err.message}`;
     } finally {
       busy = false;
+      if ($('#cam-auto').checked && stream) scheduleNext();
     }
   }
 
@@ -260,15 +264,23 @@ if (camVideo) {
   });
   $('#cam-auto').addEventListener('change', (event) => {
     if (event.target.checked) {
-      const ms = Number($('#cam-interval').value) || 3000;
-      timer = setInterval(() => scan(false), ms);
-      statusEl.textContent = `Auto scan aktif tiap ${ms / 1000} detik (tanpa simpan log).`;
+      statusEl.textContent = 'Auto scan cepat aktif (preview plat, tanpa simpan log).';
+      scheduleNext(true);
     } else if (timer) {
-      clearInterval(timer);
+      clearTimeout(timer);
       timer = null;
       statusEl.textContent = 'Auto scan berhenti.';
     }
   });
+
+  function scheduleNext(immediate = false) {
+    if (timer) clearTimeout(timer);
+    const ms = immediate ? 0 : Number($('#cam-interval').value) || 1000;
+    timer = setTimeout(() => {
+      timer = null;
+      scan(false);
+    }, ms);
+  }
 }
 
 /* --- Polling alert dashboard --- */
