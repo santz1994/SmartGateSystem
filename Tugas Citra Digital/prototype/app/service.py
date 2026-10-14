@@ -31,6 +31,7 @@ class FrameResult:
     is_best_frame: bool = False
     ocr_backend: str = ""
     vehicle_class: str | None = None
+    diagnostic_paths: list[str] = field(default_factory=list)
     detections: list[pipeline.Detection] = field(default_factory=list)
     stages: dict[str, Any] = field(default_factory=dict)
 
@@ -101,6 +102,7 @@ class EvaluationResult:
                     "frame_score": round(f.frame_score, 2),
                     "is_best_frame": f.is_best_frame,
                     "vehicle_class": f.vehicle_class,
+                    "diagnostic_paths": f.diagnostic_paths,
                     "vehicle_class_label": vehicles.label(f.vehicle_class),
                     "detections": [
                         {"kind": d.kind, "confidence": d.confidence, "payload": d.payload, "bbox": d.bbox}
@@ -196,6 +198,11 @@ def _process_frame(
     result.detections = plates + stickers
     detection_conf = max((d.confidence for d in result.detections), default=0.0)
     result.frame_score = pipeline.frame_score(image, detection_conf)
+    if plate_enabled and (
+        not result.plate_text
+        or result.plate_confidence < config.DEFAULTS["plat_confidence_threshold"]
+    ):
+        _save_failed_diagnostics(result, session_id)
     return result
 
 
@@ -359,6 +366,31 @@ def _save_stages(frame: FrameResult, session_id: str) -> None:
         _save(image, f"{session_id}/stages/{frame.label}_{name}.png")
 
 
+def _save_failed_diagnostics(frame: FrameResult, session_id: str) -> None:
+    """Simpan bukti crop/frame gagal tanpa membuat Auto scan memenuhi disk."""
+    images = {
+        "frame": frame.stages.get("original"),
+        "plate_raw": frame.stages.get("plate_raw"),
+        "plate_crop": frame.stages.get("plate_crop"),
+        "plate_enhanced": frame.stages.get("plate_enhanced"),
+    }
+    for name, image in images.items():
+        if image is None or getattr(image, "size", 0) == 0:
+            continue
+        relative = f"{session_id}_{frame.label}_{name}.jpg"
+        path = config.DIAGNOSTIC_DIR / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(encode_image(image))
+        frame.diagnostic_paths.append(f"diag/ocr_failed/{relative}")
+
+    files = sorted(
+        (path for path in config.DIAGNOSTIC_DIR.glob("*") if path.is_file()),
+        key=lambda path: path.stat().st_mtime,
+    )
+    for path in files[:-config.MAX_DIAGNOSTIC_FILES]:
+        path.unlink(missing_ok=True)
+
+
 # --- Tindakan satpam ----------------------------------------------------------
 
 def guard_action(log_id: int, action: str, username: str, note: str) -> tuple[bool, str]:
@@ -387,5 +419,16 @@ def snapshot_path(relative: str) -> Path | None:
     candidate = (config.SNAPSHOT_DIR / relative).resolve()
     root = config.SNAPSHOT_DIR.resolve()
     if root not in candidate.parents and candidate != root:
+        return None
+    return candidate if candidate.is_file() else None
+
+
+def diagnostic_path(relative: str) -> Path | None:
+    """Resolve diagnostic image dengan proteksi path traversal."""
+    candidate = (config.DIAGNOSTIC_DIR / relative).resolve()
+    root = config.DIAGNOSTIC_DIR.resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
         return None
     return candidate if candidate.is_file() else None

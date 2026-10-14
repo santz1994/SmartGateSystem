@@ -246,6 +246,13 @@ def create_app() -> Flask:
             abort(404)
         return send_file(path, mimetype="image/jpeg" if path.suffix == ".jpg" else "image/png")
 
+    @app.get("/diagnostics/<path:relative>")
+    def diagnostic(relative: str) -> Any:
+        path = service.diagnostic_path(relative)
+        if path is None:
+            abort(404)
+        return send_file(path, mimetype="image/jpeg")
+
     @app.errorhandler(413)
     def too_large(_: Any) -> Any:
         return jsonify({"error": f"Ukuran unggahan melebihi {config.MAX_UPLOAD_MB} MB"}), 413

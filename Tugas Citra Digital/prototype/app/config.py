@@ -12,7 +12,9 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.getenv("SGS_DATA_DIR", BASE_DIR / "data"))
 SNAPSHOT_DIR = DATA_DIR / "snapshots"
+DIAGNOSTIC_DIR = DATA_DIR / "diag" / "ocr_failed"
 DB_PATH = Path(os.getenv("SGS_DB", DATA_DIR / "smartgate.db"))
+MAX_DIAGNOSTIC_FILES = 100
 
 # Ambang default. Nilai ini yang dipakai bila baris system_settings tidak ada.
 DEFAULTS: dict[str, float] = {
@@ -45,3 +47,4 @@ MAX_UPLOAD_MB = 16
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    DIAGNOSTIC_DIR.mkdir(parents=True, exist_ok=True)

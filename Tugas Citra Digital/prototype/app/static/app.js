@@ -45,6 +45,13 @@ function renderResult(data) {
       <tr><td>Session</td><td><code>${data.session_id}</code></td></tr>
     </table>
     ${data.snapshot_url ? `<p><img class="snapshot" src="/${data.snapshot_url}" alt="snapshot"></p>` : ''}
+    ${data.frames.some((f) => f.diagnostic_paths && f.diagnostic_paths.length)
+      ? `<p class="muted small">Crop diagnostik gagal:
+          ${data.frames.flatMap((f) => f.diagnostic_paths || [])
+            .map((path) => `<a href="/diagnostics/${path.replace('diag/ocr_failed/', '')}" target="_blank">${path.split('/').pop()}</a>`)
+            .join(' · ')}
+        </p>`
+      : ''}
     <table class="data">
       <thead><tr><th>Frame</th><th>Sumber</th><th>Plat</th><th>Conf</th><th>Stiker</th><th>Conf</th><th>Ketajaman</th><th></th></tr></thead>
       <tbody>${frames}</tbody>
