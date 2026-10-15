@@ -144,6 +144,8 @@ Setiap `gate_logs` **wajib** menyimpan:
 | Waktu keputusan otomatis (frame akhir → motor bergerak) | ≤ 1.5 detik |
 | Latensi alert ke dashboard satpam | ≤ 1 detik |
 | Kelengkapan log (ada foto) | 100% |
+| Ketepatan pembacaan plat nomor & stiker (fusion) | ≥ 99% |
+| Kecepatan pemrosesan *best frame* & OCR | ≤ 0.5 detik per frame |
 
 ---
 
