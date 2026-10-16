@@ -17,9 +17,28 @@ ROLE_CHOICES = ("satpam1", "admin")
 VEHICLE_TYPES = ("car", "motorcycle", "truck", "custom")
 OWNER_TYPES = ("warga", "karyawan", "tamu")
 
-# Run training YOLO (train_yolo.py --name smartgate) — dipantau halaman /training.
-TRAIN_RUN_DIR = config.BASE_DIR / "runs" / "detect" / "runs" / "detect" / "smartgate"
-TRAIN_PLOTS = ("results.png", "labels.jpg", "train_batch0.jpg", "confusion_matrix_normalized.png")
+# Run training YOLO — dipantau halaman /training. Pilih run terbaru otomatis
+# (Colab V5 pakai runs/detect/smartgate-colab-v5, training lama runs/detect/runs/detect/smartgate).
+def _latest_train_run() -> Path:
+    candidates = [
+        d.parent for d in config.BASE_DIR.glob("runs/detect/*/results.csv")
+    ] + [
+        d.parent for d in config.BASE_DIR.glob("runs/detect/runs/detect/*/results.csv")
+    ]
+    candidates = [d for d in candidates if d.is_dir()]
+    if not candidates:
+        return config.BASE_DIR / "runs" / "detect" / "smartgate-colab-v5"
+    return max(candidates, key=lambda d: (d / "results.csv").stat().st_mtime)
+
+
+TRAIN_RUN_DIR = _latest_train_run()
+TRAIN_PLOTS = (
+    "results.png",
+    "labels.jpg",
+    "train_batch0.jpg",
+    "confusion_matrix_normalized.png",
+    "confusion_matrix.png",
+)
 
 
 def create_app() -> Flask:
@@ -280,7 +299,15 @@ def training_status() -> dict[str, Any]:
         with csv_path.open(newline="", encoding="utf-8") as fh:
             epochs = [{k.strip(): v.strip() for k, v in row.items()} for row in csv.DictReader(fh)]
     weights = TRAIN_RUN_DIR / "weights" / "best.pt"
+    summary: dict[str, Any] = {}
+    summary_path = TRAIN_RUN_DIR / "evaluation_summary.json"
+    if summary_path.is_file():
+        import json
+
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
     return {
+        "run_name": TRAIN_RUN_DIR.name,
+        "summary": summary,
         "epochs": epochs,
         "latest": epochs[-1] if epochs else None,
         "plots": [name for name in TRAIN_PLOTS if (TRAIN_RUN_DIR / name).is_file()],

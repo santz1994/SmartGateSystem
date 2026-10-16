@@ -5,10 +5,10 @@
 <meta http-equiv="refresh" content="15">
 
 <section class="card">
-  <h2>Proses Training YOLOv8 — <code>dataset_merged</code></h2>
+  <h2>Proses Training YOLOv8 — <code>{{ status.run_name }}</code></h2>
   <p class="muted">
     Halaman ini memantau training yang berjalan (auto-refresh 15 detik).
-    Sumber data: <code>plat-nomor/</code> + <code>datasets/detection/</code> (COCO).
+    Dataset: gabungan Roboflow + Kaggle COCO + background (anti-leakage, prefix rf_/kg_/bg_).
     Bobot terbaik dipakai prototipe via <code>SGS_YOLO_WEIGHTS</code>.
   </p>
   <table class="kv">
@@ -19,6 +19,14 @@
     <tr><td>mAP50 terakhir</td><td><strong>{{ '%.3f'|format(status.latest['metrics/mAP50(B)']|float) }}</strong></td></tr>
     <tr><td>Precision / Recall</td>
         <td>{{ '%.2f'|format(status.latest['metrics/precision(B)']|float) }} / {{ '%.2f'|format(status.latest['metrics/recall(B)']|float) }}</td></tr>
+    {% endif %}
+    {% if status.summary %}
+    <tr><td>Test mAP50 / mAP50-95</td>
+        <td><strong>{{ '%.2f'|format(status.summary.test.mAP50 * 100) }}%</strong> / {{ '%.2f'|format(status.summary.test.mAP50_95 * 100) }}%</td></tr>
+    <tr><td>Valid format OCR</td>
+        <td>{{ '%.2f'|format(status.summary.ocr_and_gate_benchmark.valid_format_rate * 100) }}% ({{ status.summary.ocr_and_gate_benchmark.valid_indonesian_format_count }}/{{ status.summary.ocr_and_gate_benchmark.total_detected_plates }} plat)</td></tr>
+    <tr><td>Latency rata-rata / P95</td>
+        <td>{{ status.summary.ocr_and_gate_benchmark.avg_end_to_end_latency_ms }} ms / {{ status.summary.ocr_and_gate_benchmark.p95_end_to_end_latency_ms }} ms</td></tr>
     {% endif %}
   </table>
 </section>

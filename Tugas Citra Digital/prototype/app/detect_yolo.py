@@ -56,6 +56,7 @@ def _default_weights() -> Path | None:
     """Pilih bobot training lokal bila operator belum mengatur environment."""
     base = Path(__file__).resolve().parent.parent
     for relative in (
+        "runs/detect/smartgate-colab-v5/weights/best.pt",
         "runs/detect/runs/detect/smartgate/weights/best.pt",
         "runs/detect/runs/detect/smartgate-full/weights/best.pt",
     ):

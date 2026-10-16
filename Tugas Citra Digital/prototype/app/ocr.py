@@ -43,6 +43,17 @@ _TO_ALPHA = str.maketrans({
     "7": "T", "8": "B",
 })
 _AMBIGUOUS = set("OIZSBG012568")  # pasangan huruf-angka yang sering tertukar
+
+# Kode wilayah TNKB tidak pernah memakai O/Q/I/L/angka. Plat Makassar "DD"
+# sering terbaca "00"/"O0" — koreksi HANYA blok prefix memakai peta ini, bukan
+# seluruh teks, supaya angka di blok nomor urut tidak ikut tersentuh.
+_PREFIX_FIX = str.maketrans({"0": "D", "1": "D", "O": "D", "I": "D", "L": "D", "8": "B"})
+VALID_PREFIXES = frozenset({
+    "A","B","D","E","F","G","H","K","L","M","N","P","R","S","T","W","Z",
+    "AA","AB","AD","AE","AG","BA","BB","BD","BE","BG","BH","BK","BL","BM",
+    "BN","BP","DA","DB","DC","DD","DE","DG","DH","DK","DL","DM","DN","DP",
+    "DR","DT","DW","EA","EB","ED","KB","KH","KT","KU","PA","PB",
+})
 NUMBER_GROUPS = ((1, 1999, "car"), (2000, 6999, "motorcycle"), (7000, 8999, "truck"), (9000, 9999, "custom"))
 
 _FONT_CANDIDATES = (
@@ -97,10 +108,17 @@ def normalize_plate(text: str) -> str:
             score = sum(_char_scores(c)[0] for c in prefix + suffix)
             score += sum(_char_scores(c)[1] for c in digits)
             score += 0.5 * digit_len
+            prefix_fixed = prefix.translate(_PREFIX_FIX)
+            if prefix_fixed in VALID_PREFIXES:
+                score += 2.0  # kode wilayah valid mengalahkan split lain
+            if digits.startswith("0"):
+                # NRKB tak pernah diawali 0; netralkan tie-split yang mencuri
+                # angka ke blok prefix (mis. "O05441XS" -> DD5441XS, bukan D0544...).
+                score -= 0.5
             if score > best_score:
                 best_score = score
                 best_text = "".join(
-                    (prefix.translate(_TO_ALPHA), digits.translate(_TO_DIGIT), suffix.translate(_TO_ALPHA))
+                    (prefix_fixed, digits.translate(_TO_DIGIT), suffix.translate(_TO_ALPHA))
                 )
     return best_text
 
