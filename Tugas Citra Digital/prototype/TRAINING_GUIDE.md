@@ -13,7 +13,7 @@ folder `prototype/`.
 | `plat-nomor/` | YOLO detection | 393 train, 84 valid, 84 test | Sumber deteksi awal |
 | `datasets/detection/` | COCO | 1.377 gambar dan 2.128 anotasi | Dikonversi ke YOLO |
 | `datasets/text/` | CSV + crop | 1.863 crop dengan `label.csv` | Evaluasi/pengembangan OCR |
-| `dataset_merged/` | YOLO detection | train 1.557, valid 290, test 84 | Dataset training utama |
+| `dataset_merged/` | YOLO detection | train 1.572, valid 290, test 84 | Dataset training utama |
 | `dataset_extra/` | Gambar web | 13 positif dan 2 negatif terakhir | Data tambahan, bukan ground truth utama |
 
 `dataset_merged/data.yaml` saat ini hanya memiliki satu kelas:
@@ -103,40 +103,47 @@ terakhir.
 
 ### Hasil yang sudah tercatat
 
-Run awal `smartgate` (15 epoch, `imgsz=416`, CPU) menghasilkan kira-kira:
+Run **V5 `smartgate-colab-v5`** (Colab, YOLOv8n, 50 epoch, dataset gabungan
+Roboflow + Kaggle COCO + background dengan anti-leakage) adalah run aktif saat
+ini. Ringkasan lengkap ada di `runs/detect/smartgate-colab-v5/evaluation_summary.json`:
 
 | Metrik | Nilai |
 | --- | ---: |
-| Precision | 0,714 |
-| Recall | 0,668 |
-| mAP50 | 0,716 |
-| mAP50-95 | 0,435 |
+| Validation mAP50 | 0,8938 |
+| Validation mAP50-95 | 0,5339 |
+| Test mAP50 | 0,9491 |
+| Test mAP50-95 | 0,5999 |
+| Valid format rate OCR (V4 parser) | 73,95% (88/119 plat) |
+| Latency rata-rata / P95 | 98,22 ms / 176,99 ms |
 
-Run `smartgate-full` belum selesai. File hasil yang tersedia baru 4 epoch; nilai
-terbaik sementara pada epoch 2 adalah precision 0,8280, recall 0,5561, mAP50
-0,6671, dan mAP50-95 0,3737. Nilai ini **bukan hasil final** dan tidak boleh
-dipakai sebagai klaim performa produksi.
+Run lama yang masih tersimpan (baseline historis, jangan dipakai untuk klaim):
+
+- `smartgate` (15 epoch, `imgsz=416`, CPU): precision 0,714; recall 0,668; mAP50 0,716; mAP50-95 0,435.
+- `smartgate-full` (4 epoch, belum final): mAP50 sementara 0,6671.
 
 Artefak training:
 
 ```text
-runs/detect/runs/detect/smartgate/
+runs/detect/smartgate-colab-v5/      # run aktif (V5)
 ├── results.csv
-└── weights/best.pt
+├── evaluation_summary.json
+├── confusion_matrix.png
+└── weights/best.pt, best.onnx
+runs/detect/runs/detect/smartgate/   # baseline lama
 runs/detect/runs/detect/smartgate-full/
-├── results.csv
-└── weights/best.pt
 ```
 
 Halaman [`/training`](http://localhost:5001/training) menampilkan status epoch,
-loss, precision, recall, mAP, dan plot yang tersedia.
+loss, precision, recall, mAP, plot yang tersedia, serta metrik evaluasi terbaru
+dari `evaluation_summary.json`. Halaman otomatis memilih run dengan
+`results.csv` paling baru.
 
 ## 4. Evaluasi
 
 Validasi detektor:
 
 ```powershell
-yolo val model=runs/detect/runs/detect/smartgate/weights/best.pt `
+yolo val model=runs/detect/smartgate-colab-v5/weights/best.pt `
   data=dataset_merged/data.yaml
 ```
 
@@ -153,12 +160,13 @@ OCR: mAP tidak berarti teks plat pasti terbaca benar.
 ## 5. Memakai Bobot di Prototype
 
 ```powershell
-$env:SGS_YOLO_WEIGHTS = "D:\Project\Smart Gate System\Tugas Citra Digital\prototype\runs\detect\runs\detect\smartgate\weights\best.pt"
+$env:SGS_YOLO_WEIGHTS = "D:\Project\Smart Gate System\Tugas Citra Digital\prototype\runs\detect\smartgate-colab-v5\weights\best.pt"
 python run.py
 ```
 
-Jika `SGS_YOLO_WEIGHTS` tidak diisi, prototype otomatis mencari
-`runs/detect/runs/detect/smartgate/weights/best.pt`. Hasil YOLO tetap melewati
+Jika `SGS_YOLO_WEIGHTS` tidak diisi, prototype otomatis memakai bobot terbaru
+dengan urutan `runs/detect/smartgate-colab-v5`, lalu `runs/detect/runs/detect/smartgate`,
+lalu `smartgate-full`. Hasil YOLO tetap melewati
 gerbang confidence, rasio plat, tekstur, dan jumlah glyph; kotak yang hanya
 menyerupai gril/emblem tidak diteruskan ke OCR.
 
@@ -201,7 +209,11 @@ Aturan NRKB digunakan sebagai **skor tambahan**, bukan kebenaran tunggal:
 - prefix 1--3 huruf;
 - nomor urut 1--4 digit dan digit pertamanya bukan `0`;
 - suffix 0--3 huruf;
-- konteks posisi membedakan `B/8`, `6/G`, `1/I`, `O/0`, `I/1`, `L/1`, `S/5`, `T/7`, `A/4`, `D/0`, `V/U`, `W/VV`, `X/XX`, `Z/2`.
+- konteks posisi membedakan `B/8`, `6/G`, `1/I`, `O/0`, `I/1`, `L/1`, `S/5`, `T/7`, `A/4`, `D/0`, `V/U`, `W/VV`, `X/XX`, `Z/2`;
+- koreksi blok prefix (`_PREFIX_FIX`): `0/1/O/I/L` → `D`, `8` → `B`, plus bonus
+  skor untuk kode wilayah valid di `VALID_PREFIXES` — mis. `005877US` →
+  `DD5877US` (plat Makassar), dan blok angka diawali `0` dikenai penalti karena
+  NRKB tak pernah mulai dari `0`.
 
 Referensi struktur nomor: [Bapenda Jawa Barat](https://bapenda.jabarprov.go.id/2017/10/24/kenali-penomoran-kendaraan-bermotor/).
 

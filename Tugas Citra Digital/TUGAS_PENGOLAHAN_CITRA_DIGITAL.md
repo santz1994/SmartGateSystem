@@ -62,13 +62,17 @@ membanjiri log.
 
 Dataset utama berada di `prototype/dataset_merged`:
 
-- train: 1.557 gambar;
+- train: 1.572 gambar;
 - valid: 290 gambar;
 - test: 84 gambar;
 - satu kelas: `number-plate`.
 
-Sumbernya adalah dataset YOLO `plat-nomor/` dan dataset COCO
-`datasets/detection/` yang dikonversi. Dataset OCR `datasets/text/` digunakan
+Sumbernya adalah dataset YOLO `plat-nomor/`, dataset COCO
+`datasets/detection/` yang dikonversi, plus set Roboflow "Indonesia License
+Plate Detection", dataset Kaggle (COCO), dan latar tanpa plat dari
+`no-plate-backgrounds.zip`. Penggabungan Colab memakai prefix `rf_`, `kg_`,
+dan `bg_`; data latar hanya masuk split train dan split valid/test dijaga
+steril dari train (anti-leakage). Dataset OCR `datasets/text/` digunakan
 untuk crop dengan label teks. Data tambahan Wikimedia Commons berjumlah
 sekitar 13 positif dan 2 negatif pada pengambilan terakhir; sumber dan lisensi
 dicatat di `dataset_extra/SOURCES.md`.
@@ -134,7 +138,11 @@ Struktur yang divalidasi:
 - nomor urut 1--4 angka, tidak diawali angka `0`;
 - suffix 0--3 huruf;
 - karakter ambigu dikoreksi berdasarkan posisi, bukan penggantian global:
-  `B/8`, `6/G`, `1/I`, `O/0`, `I/1`, `L/1`, `S/5`, `T/7`, `A/4`, `D/0`, `V/U`, `W/VV`, `X/XX`, `Z/2`.
+  `B/8`, `6/G`, `1/I`, `O/0`, `I/1`, `L/1`, `S/5`, `T/7`, `A/4`, `D/0`, `V/U`, `W/VV`, `X/XX`, `Z/2`;
+- koreksi blok prefix (V4 parser): `0/1/O/I/L` → `D`, `8` → `B`, dengan bonus
+  skor untuk kode wilayah valid (`VALID_PREFIXES`) sehingga plat Makassar yang
+  terbaca `005877US` dikoreksi menjadi `DD5877US`; blok angka diawali `0`
+  dikenai penalti karena NRKB tidak pernah diawali `0`.
 
 Rentang nomor kendaraan (1--1999 mobil penumpang, 2000--6999 sepeda motor,
 7000--7999 bus, 8000--8999 barang, 9000--9999 khusus) hanya menjadi petunjuk
@@ -171,23 +179,37 @@ python train_yolo.py --data dataset_merged/data.yaml --epochs 15 `
   --imgsz 416 --batch 8 --device cpu --patience 5 --name smartgate
 ```
 
-Run awal 15 epoch menghasilkan kira-kira precision 0,714, recall 0,668,
-mAP50 0,716, dan mAP50-95 0,435. Run `smartgate-full` yang tersedia baru
-empat epoch, dengan nilai terbaik sementara mAP50 0,6671; run tersebut belum
-final. Untuk training yang terlihat prosesnya, buka `/training` saat run aktif
-atau amati `results.csv` dan plot di folder run.
+Run **V5 `smartgate-colab-v5`** (Colab, YOLOv8n, 50 epoch, dataset gabungan
+Roboflow + Kaggle COCO + background) adalah run aktif dengan hasil terbaik
+sejauh ini:
+
+| Metrik | Nilai |
+| --- | ---: |
+| Validation mAP50 | 0,8938 |
+| Validation mAP50-95 | 0,5339 |
+| Test mAP50 | 0,9491 |
+| Test mAP50-95 | 0,5999 |
+| Valid format rate OCR (V4 parser) | 73,95% (88/119 plat) |
+| Latency rata-rata / P95 | 98,22 ms / 176,99 ms |
+
+Run awal 15 epoch lokal menghasilkan kira-kira precision 0,714, recall 0,668,
+mAP50 0,716, dan mAP50-95 0,435; run `smartgate-full` (4 epoch) berhenti pada
+mAP50 sementara 0,6671 — keduanya hanya baseline historis. Halaman
+`/training` otomatis menampilkan run dengan `results.csv` paling baru.
 
 Bobot dipasang melalui:
 
 ```powershell
-$env:SGS_YOLO_WEIGHTS = "D:\Project\Smart Gate System\Tugas Citra Digital\prototype\runs\detect\runs\detect\smartgate\weights\best.pt"
+$env:SGS_YOLO_WEIGHTS = "D:\Project\Smart Gate System\Tugas Citra Digital\prototype\runs\detect\smartgate-colab-v5\weights\best.pt"
 python run.py
 ```
 
-Validasi detektor dan OCR harus dilaporkan terpisah:
+Tanpa `SGS_YOLO_WEIGHTS`, prototype memakai bobot terbaru secara otomatis
+(`smartgate-colab-v5` di urutan pertama). Validasi detektor dan OCR harus
+dilaporkan terpisah:
 
 ```powershell
-yolo val model=runs/detect/runs/detect/smartgate/weights/best.pt `
+yolo val model=runs/detect/smartgate-colab-v5/weights/best.pt `
   data=dataset_merged/data.yaml
 python tools/eval_real.py --part both --limit 200
 ```
