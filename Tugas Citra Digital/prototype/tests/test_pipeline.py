@@ -276,6 +276,64 @@ def test_signed_sticker_token() -> None:
     else:
         os.environ["SGS_STICKER_SIGNING_KEY"] = previous
 
+def test_monitor_moire() -> None:
+    print("plat di layar monitor (moiré, banding, pantulan)")
+    cv2, np = pipeline._cv2(), pipeline._np()
+
+    def degrade(img, seed, strength):
+        h, w = img.shape[:2]
+        y = np.arange(h, dtype=np.float32)
+        x = np.arange(w, dtype=np.float32)
+        out = img.astype(np.float32)
+        out += np.sin(2 * np.pi * x / 6.0)[None, :, None] * 8 * strength
+        out += np.sin(2 * np.pi * y / 3.0)[:, None, None] * 8 * strength
+        out += np.sin(2 * np.pi * y / 55.0)[:, None, None] * 14 * strength
+        glare = np.zeros((h, w), np.float32)
+        cv2.line(glare, (0, 0), (w, h), 1.0, 50)
+        glare = cv2.GaussianBlur(glare, (0, 0), 18)
+        out = np.clip(out + glare[:, :, None] * 60 * strength, 0, 255).astype(np.uint8)
+        out = cv2.GaussianBlur(out, (3, 3), 0.6)
+        return np.clip(
+            out.astype(np.int16) + np.random.default_rng(seed).normal(0, 5, out.shape), 0, 255
+        ).astype(np.uint8)
+
+    clean = simulate.render_plate("B 1234 XYZ", height=110, aspect=3.54)
+    text, conf, _ = ocr.read_plate_robust(degrade(clean, 1, 1.0))
+    check("moiré sedang: teks benar & conf >= ambang 0.85", text == "B1234XYZ" and conf >= 0.85,
+          f"(dapat {text!r} conf {conf})")
+
+    hard = simulate.render_plate("B 1999 OG", height=110, aspect=3.54)
+    text, conf, _ = ocr.read_plate_robust(degrade(hard, 7, 1.8))
+    check("moiré berat: teks tetap benar", text == "B1999OG", f"(dapat {text!r} conf {conf})")
+
+def test_distractors() -> None:
+    print("distraktor layar/video (subtitle + blok warna)")
+    cv2, np = pipeline._cv2(), pipeline._np()
+    frame = np.full((480, 854, 3), 30, np.uint8)
+    screen = np.zeros((300, 520, 3), np.uint8)  # layar gelap dengan subtitle putih
+    cv2.putText(screen, "WELCOME TO MY PODCAST", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+    frame[60:360, 30:550] = screen
+    cv2.rectangle(frame, (600, 40), (750, 190), (60, 180, 255), -1)  # blok warna jenuh
+    plate = cv2.resize(simulate.render_plate("DD 5678 XY", height=110, aspect=3.54), (220, 62))
+    frame[190:252, 610:830] = plate
+
+    check("bingkai plat terdeteksi tinggi", pipeline.plate_border_score(plate) > 0.25,
+          f"(dapat {pipeline.plate_border_score(plate):.2f})")
+    subtitle = screen[60:200, 10:500]
+    check("subtitle tanpa bingkai plat", pipeline.plate_border_score(subtitle) < 0.15,
+          f"(dapat {pipeline.plate_border_score(subtitle):.2f})")
+
+    dets = pipeline.detect_plates(frame)
+    best = max(dets, key=lambda d: pipeline.candidate_score(d, frame.shape)) if dets else None
+    check("kandidat teratas = plat, bukan distraktor", best is not None and best.bbox[0] > 550,
+          f"(dapat {best.bbox if best else None})")
+
+    stickers = pipeline.detect_stickers(frame)
+    check(
+        "blok warna video bukan bukti stiker",
+        not any(sticker.decode_sticker(s)[0] for s in stickers if s.meta.get("decoder") == "color_patch"),
+    )
+
 def main() -> int:
     tests = [
         test_normalize_plate,
@@ -290,6 +348,8 @@ def main() -> int:
         test_plate_text_quality_gate,
         test_signed_sticker_token,
         test_read_plate_robust,
+        test_monitor_moire,
+        test_distractors,
         test_decide,
         test_geometry,
         test_end_to_end,

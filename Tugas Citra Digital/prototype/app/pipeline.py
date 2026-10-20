@@ -203,6 +203,10 @@ def enhance_plate(
     h, w = crop.shape[:2]
     if h == 0 or w == 0:
         return crop
+    # Redam moiré/pola piksel layar monitor: median 3x3 mematikan garis
+    # interferensi tipis tanpa mengaburkan tepi karakter.
+    if min(h, w) >= 3:
+        crop = cv2.medianBlur(crop, 3)
     scale = max(target_height / float(h), 1.0)  # hanya perbesar, jangan pernah perkecil
     up = cv2.resize(crop, (max(int(round(w * scale)), 1), max(int(round(h * scale)), 1)), interpolation=cv2.INTER_CUBIC)
 
@@ -263,6 +267,38 @@ def closeness(det: Detection, image_shape: Any) -> float:
     area_ratio = ((x2 - x1) * (y2 - y1)) / max(h * w, 1)
     front = 1.5 if y2 > h * 0.6 else 1.0  # bawah frame = lebih dekat
     return area_ratio * front
+
+def plate_border_score(crop: Any) -> float:
+    """Skor bingkai plat: tepi gelap mengelilingi inti terang (papan TNKB).
+
+    Subtitle/video (teks putih di latar hitam) punya tepi sama gelapnya dengan
+    inti -> skor mendekati 0. Papan plat punya bingkai hitam + bidang terang
+    -> skor tinggi. Faktor lembut, bukan gerbang keras (plat kusam tetap lolos)."""
+    cv2, np = _cv2(), _np()
+    if getattr(crop, "size", 0) == 0:
+        return 0.0
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
+    h, w = gray.shape[:2]
+    if h < 6 or w < 6:
+        return 0.0
+    strip = max(1, int(min(h, w) * 0.08))
+    edges = np.concatenate([
+        gray[:strip, :].ravel(), gray[-strip:, :].ravel(),
+        gray[:, :strip].ravel(), gray[:, -strip:].ravel(),
+    ])
+    core = gray[strip:h - strip, strip:w - strip]
+    if core.size == 0:
+        return 0.0
+    return float((edges < 70).mean() * (core > 140).mean())
+
+def candidate_score(det: Detection, image_shape: Any) -> float:
+    """Skor pemilihan kandidat: kemiripan bentuk plat dulu, kedekatan pemecah seri.
+
+    Blob teks/video besar tidak boleh mengambil slot OCR hanya karena dekat
+    atau lebar. ponytail: "kendaraan terdekat selalu menang" perlu MOT
+    (ByteTrack/DeepSORT) — lihat saran Bab V."""
+    border = float(det.meta.get("border", 0.5))
+    return det.confidence + border + 0.1 * closeness(det, image_shape)
 
 def drop_swallowed(detections: list[Detection]) -> list[Detection]:
     """Buang kandidat yang menelan kandidat lain — box rapat (plat asli) menang."""
@@ -478,6 +514,20 @@ def snap_to_text_band(crop: Any) -> tuple[Any, tuple[int, int, int, int]]:
         return crop, (0, 0, w, h)
     return snapped, (x1, y1, x2, y2)
 
+def pad_crop(crop: Any, frac: float = 0.06) -> Any:
+    """Beri margin di sekeliling crop hasil snap.
+
+    Snap ke pita teks memangkas rapat ke tepi tinta — lengan huruf (Y, G, 4)
+    yang samar bisa ikut terpotong lalu salah baca (mis. Y -> terbaca 1 ->
+    dinormalisasi jadi I). Margin ini wajib ada pada setiap crop yang masuk OCR.
+    """
+    np = _np()
+    if getattr(crop, "size", 0) == 0:
+        return crop
+    h, w = crop.shape[:2]
+    py, px = max(int(h * frac), 2), max(int(w * frac), 2)
+    return np.pad(crop, ((py, py), (px, px), (0, 0)), mode="edge")
+
 def _tight_quad(quad: Any, crop_shape: Any, rect: tuple[int, int, int, int]) -> Any:
     """Petakan kotak ruang-crop kembali ke ruang gambar — quad jadi rapat."""
     cv2, np = _cv2(), _np()
@@ -665,6 +715,7 @@ def detect_plates_classic(image: Any, max_candidates: int = 8) -> list[Detection
             break
         quad = order_points(box)
         full_crop = four_point_transform(image, quad)
+        border = plate_border_score(full_crop)  # bingkai dihitung sebelum snap memotong tepi
         crop, rect = snap_to_text_band(full_crop)  # buang konteks bodi dari blob kandidat
         if crop.size == 0 or not plate_texture_ok(crop):
             continue
@@ -675,14 +726,16 @@ def detect_plates_classic(image: Any, max_candidates: int = 8) -> list[Detection
         if any(_iou(quad, kept_quad) > 0.4 for kept_quad in kept_quads):
             continue
         kept_quads.append(quad)
+        ocr_view = pad_crop(crop)  # snap rapat -> margin wajib sebelum OCR
         detections.append(
             Detection(
                 kind="plate",
                 quad=[[float(x), float(y)] for x, y in quad],
                 confidence=plausibility,
-                crop=normalize_plate_size(crop),
+                crop=normalize_plate_size(ocr_view),
                 meta={
-                    "raw_crop": crop,
+                    "raw_crop": ocr_view,
+                    "border": round(border, 4),
                     "vehicle_class": vehicle_class,
                     "orientation": orientation,
                     "glyph_count": glyphs,
@@ -780,12 +833,18 @@ def annotate(image: Any, detections: list[Detection], label: str = "") -> Any:
     colors = {"plate": (0, 200, 0), "sticker": (0, 165, 255)}
     for det in detections:
         pts = _np().array(det.quad, dtype="int32").reshape(-1, 1, 2)
-        cv2.polylines(out, [pts], True, colors.get(det.kind, (255, 255, 255)), 2)
+        # Hanya kotak utama yang terang; kandidat sekunder tipis gelap agar
+        # tampilan tidak "sibuk" saat latar penuh objek mirip plat.
+        primary = bool(det.meta.get("primary"))
+        color = colors.get(det.kind, (255, 255, 255)) if primary else (90, 90, 90)
+        cv2.polylines(out, [pts], True, color, 3 if primary else 1)
+        if not primary:
+            continue
         x, y, _, _ = det.bbox
         text = f"{det.kind} {det.confidence:.2f}"
         if det.payload:
             text += f" {det.payload}"
-        cv2.putText(out, text, (x, max(y - 8, 14)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, colors.get(det.kind, (255, 255, 255)), 2)
+        cv2.putText(out, text, (x, max(y - 8, 14)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
     if label:
         cv2.putText(out, label, (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
     return out

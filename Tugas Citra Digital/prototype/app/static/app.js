@@ -166,6 +166,14 @@ if (camVideo) {
     for (const frame of data.frames || []) {
       for (const det of frame.detections || []) {
         const [x1, y1, x2, y2] = det.bbox;
+        // Kotak utama terang + label; kandidat sekunder tipis transparan saja
+        // agar tampilan tidak "sibuk" saat latar ramai objek mirip plat.
+        if (!det.primary) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.30)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(x1 * sx, y1 * sy, (x2 - x1) * sx, (y2 - y1) * sy);
+          continue;
+        }
         ctx.strokeStyle = colors[det.kind] || '#ffffff';
         ctx.lineWidth = 3;
         ctx.strokeRect(x1 * sx, y1 * sy, (x2 - x1) * sx, (y2 - y1) * sy);

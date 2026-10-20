@@ -441,6 +441,8 @@ def _enhance_ocr_crop(crop: Any) -> Any:
     if getattr(crop, "size", 0) == 0:
         return crop
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    if min(gray.shape[:2]) >= 3:
+        gray = cv2.medianBlur(gray, 3)  # anti-moiré layar monitor
     scale = max(2.0, 120.0 / max(gray.shape[0], 1))
     gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
     clahe = cv2.createCLAHE(clipLimit=1.8, tileGridSize=(8, 8))
@@ -497,7 +499,9 @@ def read_plate_robust(
             break
         prev_text = text
 
-    if not fast and not _looks_like_plate(best[0]):
+    # Retry penuh juga saat hasil valid-struktur tapi keyakinan rendah: kesalahan
+    # baca akibat moiré sering tetap "terlihat seperti plat" (mis. BB1999OGI).
+    if not fast and (not _looks_like_plate(best[0]) or best_score[2] < 0.80):
         for variant in (pipeline.deglare(crop), _enhance_ocr_crop(crop)):
             text, confidence, backend = read_plate(variant)
             valid = 1 if _looks_like_plate(text) else 0

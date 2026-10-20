@@ -31,7 +31,8 @@ from .pipeline import (
     plate_plausibility,
     plate_texture_ok,
     snap_to_text_band,
-    _tight_quad,
+    plate_border_score,
+    pad_crop,
 )
 
 ENV_VAR = "SGS_YOLO_WEIGHTS"
@@ -161,6 +162,7 @@ def detect(image: Any, max_candidates: int = 4) -> list[Detection]:
         crop = four_point_transform(image, quad)
         if crop.size == 0:
             continue
+        border = plate_border_score(crop)  # bingkai plat pada box penuh, sebelum snap
         texture_ok = plate_texture_ok(crop)
         vehicle_class, orientation, glyphs, plausibility = plate_plausibility(crop)
         min_aspect, max_aspect = ASPECT_RANGES.get(
@@ -182,17 +184,19 @@ def detect(image: Any, max_candidates: int = 4) -> list[Detection]:
         # Bobot hasil training kadang mengurung seluruh bagian depan mobil,
         # bukan papan platnya. Persempit box visual dan crop OCR ke pita teks
         # agar EasyOCR tidak ikut membaca gril, logo, atau bumper.
-        text_band, text_rect = snap_to_text_band(crop)
+        text_band, _ = snap_to_text_band(crop)
         if getattr(text_band, "size", 0):
-            quad = _tight_quad(quad, crop.shape, text_rect)
             crop = text_band
+        # Quad overlay sengaja TIDAK dirapatkan ke pita teks: kotak yang berubah
+        # tiap frame (loncat-loncat) membingungkan petugas dan tampak memotong
+        # papan plat. Konteks bodi tetap dibuang oleh snap pada ocr_crop di bawah.
         ocr_crop = four_point_transform(image, _padded_quad(quad, image.shape))
         # Bobot lama kadang memberi box sedikit lebih besar dari papan plat.
         # Buang konteks bodi/roda sebelum EasyOCR agar suffix tidak tenggelam
         # oleh teks dan tepi lain di dalam box.
         text_crop, _ = snap_to_text_band(ocr_crop)
         if getattr(text_crop, "size", 0):
-            ocr_crop = text_crop
+            ocr_crop = pad_crop(text_crop)  # snap rapat -> margin wajib dikembalikan
         detection = Detection(
                 kind="plate",
                 quad=[[float(x), float(y)] for x, y in quad],
@@ -201,6 +205,7 @@ def detect(image: Any, max_candidates: int = 4) -> list[Detection]:
                 meta={
                     "raw_crop": ocr_crop,
                     "detector_crop": crop,
+                    "border": round(border, 4),
                     "vehicle_class": vehicle_class,
                     "orientation": orientation,
                     "glyph_count": glyphs,

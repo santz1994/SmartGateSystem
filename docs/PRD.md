@@ -39,6 +39,11 @@
 6. **Security:** Autentikasi JWT untuk *dashboard*, komunikasi antar-service ter-enkripsi di jaringan lokal, seluruh aksi bypass tercatat sebagai audit trail yang tidak dapat diubah.
 7. **Scalability:** Arsitektur harus mendukung penambahan gate/CCTV berikutnya hanya dengan menambah entri pada `gate_devices` tanpa perubahan kode inti.
 8. **Availability Target:** ≥ 99.5% *uptime* bulanan untuk layanan gerbang.
+9. **Robustness Citra:** Sistem harus menolak distraktor tampilan
+   (subtitle/video, blok warna, objek mirip teks) dan memberlakukan aturan
+   struktur NRKB secara **keras** — hasil yang melanggar format dianggap
+   tidak terbaca, bukan diterima sebagian. Moiré/pantulan layar ditangani di
+   lapisan pra-pemrosesan, bukan dengan menurunkan ambang keputusan.
 
 ---
 

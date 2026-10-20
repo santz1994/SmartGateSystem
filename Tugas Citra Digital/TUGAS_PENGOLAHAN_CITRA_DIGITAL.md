@@ -94,11 +94,16 @@ deteksi, frame diberi koreksi gamma ringan (`SGS_DETECTION_GAMMA`, default
 tetap dipakai untuk audit dan OCR.
 
 Deteksi yang berada di luar ROI gate disaring sebelum OCR. Saat beberapa
-kendaraan muncul, skor kedekatan mempertimbangkan luas bounding box, posisi
-lebih bawah, dan kredibilitas kandidat. Kandidat yang menelan kandidat lain
-dibuang karena sering berupa gabungan bodi/lampu/logo. Maksimal kandidat terdekat
-diteruskan ke OCR untuk menekan latency dan mencegah salah buka kendaraan
-belakang.
+kendaraan atau objek mirip plat muncul, urutan kandidat ditentukan
+`candidate_score`: kemiripan bentuk plat (skor bingkai `plate_border_score` +
+skor struktur `plate_plausibility`) didahulukan, kedekatan ke kamera (luas
+bbox + posisi bawah) hanya pemecah seri. Skor bingkai menghukum blob teks/video
+(subtitle, thumbnail) yang tidak memiliki bingkai papan plat sehingga distraktor
+layar tidak mengambil slot OCR dari plat asli. Kandidat yang menelan kandidat lain
+dibuang karena sering berupa gabungan bodi/lampu/logo. Maksimal kandidat terbaik
+diteruskan ke OCR untuk menekan latency dan mencegah salah baca kendaraan
+belakang. Pada tampilan, hanya kotak kandidat terpilih (`primary`) yang digambar
+terang; kandidat sekunder digambar tipis transparan agar tidak "sibuk".
 
 ROI default prototype adalah x 10--90% dan y 25--100%; nilai ini harus
 dikalibrasi per kamera. Kandidat tunggal tetap dapat diproses untuk foto manual.
@@ -111,8 +116,16 @@ Urutan pemrosesan crop dapat mencakup:
 2. deteksi highlight dan inpainting `deglare`;
 3. grayscale, adaptive threshold, morphology close;
 4. CLAHE untuk kontras lokal;
-5. upscale 160/240 piksel dan unsharp mask;
-6. retry terbatas sampai hasil cukup kredibel.
+5. median blur 3×3 untuk meredam moiré/pola piksel layar monitor sebelum
+   penajaman;
+6. upscale 160/240 piksel dan unsharp mask;
+7. margin `pad_crop` dikembalikan setelah penyempitan pita teks agar lengan
+   huruf (`Y`, `G`, `4`) yang samar tidak terpotong lalu salah baca
+   (mis. `Y` terpotong → terbaca `1` → dinormalisasi `I`);
+8. retry terbatas (`deglare`, adaptive threshold) sampai hasil valid **dan**
+   keyakinan ≥ 0,80 — retry juga dipicu bila hasil valid-struktur tetapi
+   keyakinan rendah, karena kesalahan baca akibat moiré sering tetap
+   "terlihat seperti plat" (mis. `BB1999OGI`).
 
 Pantulan monitor berbeda dari pantulan kendaraan nyata. Karena itu hasil dari
 foto yang menampilkan plat pada layar monitor harus ditandai sebagai kasus
@@ -144,6 +157,12 @@ Struktur yang divalidasi:
   terbaca `005877US` dikoreksi menjadi `DD5877US`; blok angka diawali `0`
   dikenai penalti karena NRKB tidak pernah diawali `0`.
 
+Aturan di atas bukan sekadar pemeringkat: hasil OCR yang melanggar struktur
+NRKB **ditolak keras** dan dianggap tidak terbaca (teks mentah tetap disimpan
+di `plate_raw_text` untuk audit), confidence tidak ikut dihitung ke skor fusi,
+dan alasan `OCR_FAILED` menjelaskan pelanggaran format. Voting antar-frame juga
+membuang suara yang melanggar struktur sebelum penghitungan suara.
+
 Rentang nomor kendaraan (1--1999 mobil penumpang, 2000--6999 sepeda motor,
 7000--7999 bus, 8000--8999 barang, 9000--9999 khusus) hanya menjadi petunjuk
 tambahan. Sumber referensi: [Bapenda Jawa Barat](https://bapenda.jabarprov.go.id/2017/10/24/kenali-penomoran-kendaraan-bermotor/).
@@ -153,7 +172,10 @@ tambahan. Sumber referensi: [Bapenda Jawa Barat](https://bapenda.jabarprov.go.id
 Stiker/QR/pola khusus diproses sebagai bukti kedua. Stiker yang sesuai dapat
 menambah confidence, tetapi tidak boleh mengabaikan kontrol database dan aturan
 fail-safe. Implementasi prototype menyediakan deteksi stiker/fallback; kelas
-stiker belum termasuk dalam `dataset_merged` satu kelas.
+stiker belum termasuk dalam `dataset_merged` satu kelas. Blok warna jenuh
+hasil fallback hanya menjadi bukti bila berhasil didekode — kandidat yang
+gagal didekode dibuang agar objek berwarna di latar (mis. video/layar) tidak
+berubah menjadi kotak stiker palsu.
 
 ## 6. Keputusan Sistem
 
@@ -178,6 +200,13 @@ cd "D:\Project\Smart Gate System\Tugas Citra Digital\prototype"
 python train_yolo.py --data dataset_merged/data.yaml --epochs 15 `
   --imgsz 416 --batch 8 --device cpu --patience 5 --name smartgate
 ```
+
+Training berhenti otomatis melalui dua mekanisme: `patience` (tidak ada
+perbaikan mAP50 selama N epoch) dan `--target-map50` (default `0,98`,
+nonaktifkan dengan `0`) yang memaksa training berhenti begitu target mAP50
+tercapai — callback `on_fit_epoch_end` yang sama dipasang di notebook
+`plat-nomor/a.ipynb` (`TARGET_MAP50 = 0.98`) sehingga waktu komputasi
+GPU/Colab tidak terbuang untuk epoch yang tidak perlu.
 
 Run **V5 `smartgate-colab-v5`** (Colab, YOLOv8n, 50 epoch, dataset gabungan
 Roboflow + Kaggle COCO + background) adalah run aktif dengan hasil terbaik
@@ -223,6 +252,9 @@ hasil sebelum diuji pada dataset terpisah.
 
 Uji manual yang sudah dicakup meliputi normalisasi NRKB, pemilihan kandidat
 terdekat, ROI, voting OCR, retry enhancement, fusi, dan alur end-to-end.
+Regresi otomatis terkunci di `tests/test_pipeline.py` (assert tanpa framework,
+80+ pemeriksaan): aturan NRKB, voting, moiré monitor (`test_monitor_moire`),
+dan distraktor layar/video (`test_distractors`).
 Kasus seperti `L1257PR` berhasil dibantu penyempitan pita teks dan voting.
 Kasus pantulan layar seperti `AA5045YN` masih tidak stabil karena detektor
 klasik dapat memecah plat menjadi fragmen.

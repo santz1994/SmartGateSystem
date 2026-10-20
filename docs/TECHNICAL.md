@@ -147,12 +147,23 @@ smart-gate-system/
 ## 5. Algoritma Inti
 
 ### 5.1 Pengolahan Citra
-1. Ambil 5–10 *frame* terakhir per CCTV saat kendaraan ada di ROI.
+1. Ambil 5–10 *frame* terakhir per CCTV saat kendaraan ada di ROI; jalur live
+   memproses 3–5 *frame* per detik (*frame skipping*).
 2. Skor ketajaman: `sharpness = variance(Laplacian(gray))`.
 3. Pilih *frame* dengan skor `sharpness × detect_conf` tertinggi.
-4. Normalisasi: CLAHE pada kanal L (LAB), `GaussianBlur` ringan untuk CCTV ber-noise.
-5. Deteksi plat (YOLOv8) → *crop* → koreksi perspektif (4 *point transform*) → *resize* tinggi 64 px.
-6. Deteksi stiker (ROI kaca depan/bumper) → *crop* → dekode QR/AprilTag; bila gagal, fallback klasifikasi pola/warna.
+4. Crop ROI deteksi **sebelum** pemrosesan berat; gamma + CLAHE hanya pada kotak
+   ROI/plat, tidak pernah pada seluruh frame CCTV (kunci latensi rendah).
+5. Deteksi plat (YOLOv8n, fallback klasik) → penyempitan ke pita teks →
+   **kembalikan margin** (`pad_crop`) agar lengan huruf tepi tidak terpotong →
+   koreksi perspektif (4 *point transform*) → *resize* tinggi tetap.
+6. Enhancement crop plat: deglare → CLAHE kanal L → median blur 3×3
+   (anti-moiré layar) → unsharp mask; retry terbatas bila hasil belum valid
+   atau keyakinan < 0,80.
+7. Deteksi stiker (ROI kaca depan/bumper) → *crop* → dekode QR/AprilTag; bila
+   gagal, fallback klasifikasi pola/warna — kandidat yang gagal didekode
+   dibuang, bukan bukti.
+8. Kandidat diurutkan `candidate_score` (bingkai plat + struktur + kedekatan);
+   teks yang melanggar struktur NRKB ditolak keras (dianggap tidak terbaca).
 
 ### 5.2 Fusi Skor
 
@@ -175,15 +186,19 @@ Lihat tabel keputusan di [SYSTEM_FLOW.md](SYSTEM_FLOW.md#4-tabel-keputusan). Uru
 
 ### 5.4 Normalisasi Plat
 
-```python
-def normalize_plate(text: str) -> str:
-    t = text.upper()
-    t = re.sub(r"[^A-Z0-9]", "", t)
-    t = t.replace("O", "0").replace("I", "1") if t[0].isdigit() else t
-    return t
-```
+Normalisasi bersifat **block-aware**, bukan penggantian global. Teks dipecah
+menjadi blok prefix wilayah (1–3 huruf), nomor urut (1–4 angka), dan suffix
+(0–3 huruf); setiap pemecahan blok dinilai (karakter sesuai bloknya bernilai
+penuh, karakter ambigu bernilai setengah), kode wilayah valid
+(`VALID_PREFIXES`) mendapat bonus, dan nomor urut berawalan `0` dikenai
+penalti karena NRKB tidak pernah diawali `0`. Koreksi karakter ambigu
+dilakukan per blok — `0/1/O/I/L` → `D` dan `8` → `B` hanya pada prefix,
+digit → huruf hanya pada suffix.
 
-Aturan substitusi hanya diterapkan bila pola menunjukkan ambiguitas (mis. karakter ketiga bukan huruf), untuk menghindari mengubah plat seperti `B` menjadi angka.
+Hasil akhir yang tetap melanggar struktur NRKB (bagian depan wajib huruf,
+nomor tidak diawali `0`, urutan blok huruf→angka→huruf) **ditolak keras**
+sebagai tidak terbaca — bukan ditampilkan apa adanya — dan confidence-nya
+tidak dihitung ke skor fusi.
 
 ---
 

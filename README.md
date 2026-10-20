@@ -3,13 +3,15 @@
 Sistem gerbang otomatis berbasis pengenalan plat nomor Indonesia: YOLOv8 untuk
 deteksi plat + OCR (PaddleOCR/EasyOCR) dengan koreksi aturan NRKB, difusi bukti
 plat + stiker, dan keputusan fail-safe (tidak pernah `AUTO_OPEN` saat komponen
-kritis gagal).
+kritis gagal). Hasil OCR yang melanggar struktur NRKB ditolak keras
+(dianggap tidak terbaca), dan distraktor layar/video (subtitle, blok warna)
+tidak mengambil slot pembacaan.
 
 ## Struktur Repositori
 
 | Folder | Isi |
 | --- | --- |
-| [`docs/`](docs/) | Spesifikasi produksi: [PRD](docs/PRD.md), [TECHNICAL](docs/TECHNICAL.md), [SYSTEM_FLOW](docs/SYSTEM_FLOW.md), [API](docs/API.md), [DATABASE](docs/DATABASE.md) |
+| [`docs/`](docs/) | Spesifikasi produksi: [PRD](docs/PRD.md), [TECHNICAL](docs/TECHNICAL.md), [SYSTEM_FLOW](docs/SYSTEM_FLOW.md), [API](docs/API.md), [DATABASE](docs/DATABASE.md) · bahan presentasi: [PRESENTASI](docs/PRESENTASI.md) |
 | [`Tugas Citra Digital/`](Tugas%20Citra%20Digital/) | Tugas mata kuliah pengolahan citra digital + laporan |
 | [`Tugas Citra Digital/prototype/`](Tugas%20Citra%20Digital/prototype/) | Prototype Flask (aplikasi utama) |
 | `smartgate-artifacts*/` | Artefak training hasil unduhan Colab (bobot + laporan eval) |
@@ -52,5 +54,8 @@ Laporan tugas: [`TUGAS_PENGOLAHAN_CITRA_DIGITAL.md`](Tugas%20Citra%20Digital/TUG
 
 ```powershell
 cd "Tugas Citra Digital/prototype"
-python -m pytest tests -q
+python tests\test_pipeline.py
 ```
+
+Suite assert tanpa framework (80+ pemeriksaan): aturan NRKB, fusi, voting,
+moiré monitor, dan distraktor layar/video. `pytest` tidak diperlukan.

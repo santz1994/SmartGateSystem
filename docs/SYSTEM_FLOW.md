@@ -216,3 +216,23 @@ sequenceDiagram
 | :--- | :--- | :--- |
 | `IN` | CCTV 1 (approach masuk) + CCTV 2 (gate masuk) | Wajib match di `master_vehicles`; kendaraan operasional wajib booking aktif |
 | `OUT` | CCTV gate keluar | Match di `master_vehicles` cukup untuk membuka; booking diverifikasi sebagai penutup sesi kendaraan operasional |
+
+---
+
+## 10. Catatan Implementasi Prototype
+
+Pada prototype Flask saat ini (`Tugas Citra Digital/prototype/`):
+
+- **Gerbang keras aturan NRKB** — hasil OCR yang melanggar struktur (bagian
+  depan huruf, nomor tidak diawali `0`) dianggap tidak terbaca; confidence
+  tidak ikut `fused_score`, dan alasan `OCR_FAILED` menjelaskan pelanggaran
+  format. Voting antar-frame membuang suara yang melanggar struktur.
+- **Tolak distraktor** — kandidat diurutkan `candidate_score` (bingkai plat +
+  struktur + kedekatan); subtitle/objek video tidak mengambil slot OCR. Blok
+  warna fallback stiker yang gagal didekode dibuang, bukan bukti.
+- **Efisiensi CPU** — gamma+CLAHE hanya pada ROI deteksi dan crop plat (bukan
+  frame penuh); auto scan memakai jalur `fast` (preview, tanpa simpan log),
+  unggahan manual & scan-simpan-log selalu jalur penuh.
+- **Ketahanan moiré layar** — median blur 3×3 pada enhancement crop, retry
+  berbasis keyakinan (< 0,80), dan margin crop OCR dijaga (`pad_crop`) agar
+  tepi huruf tidak terpotong.

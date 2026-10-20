@@ -110,7 +110,13 @@ class EvaluationResult:
                     "diagnostic_paths": f.diagnostic_paths,
                     "vehicle_class_label": vehicles.label(f.vehicle_class),
                     "detections": [
-                        {"kind": d.kind, "confidence": d.confidence, "payload": d.payload, "bbox": d.bbox}
+                        {
+                            "kind": d.kind,
+                            "confidence": d.confidence,
+                            "payload": d.payload,
+                            "bbox": d.bbox,
+                            "primary": bool(d.meta.get("primary")),
+                        }
                         for d in f.detections
                     ],
                 }
@@ -164,8 +170,14 @@ def _process_frame(
     if plate_enabled:
         plates = pipeline.filter_gate_zone(pipeline.detect_plates(image), image.shape)
         plates = pipeline.drop_swallowed(plates)
-        plates = sorted(plates, key=lambda d: pipeline.closeness(d, image.shape), reverse=True)[: (1 if fast else 2)]
+        # Kualitas kandidat (bingkai + struktur plat) didahulukan, kedekatan
+        # gerbang pemecah seri — blob teks/video besar tidak boleh mengambil
+        # slot OCR dari plat asli.
+        plates = sorted(plates, key=lambda d: pipeline.candidate_score(d, image.shape), reverse=True)[: (1 if fast else 2)]
     stickers = pipeline.detect_stickers(image) if sticker_enabled and not fast else []
+    # Blok warna jenuh di latar (video/layar) bukan stiker: buang yang gagal
+    # terdekode agar kotak deteksi tidak "sibuk" menempel pada distraktor.
+    stickers = [s for s in stickers if sticker.decode_sticker(s)[0]]
 
     result = FrameResult(label=label, cctv_role=cctv_role, sharpness=sharpness, stages=stages)
 
@@ -189,6 +201,7 @@ def _process_frame(
                 pipeline.closeness(r[0], image.shape),
             ),
         )
+        best_plate.meta["primary"] = True
         result.plate_raw_text = text or ""
         # Gerbang keras aturan NRKB (bagian depan huruf, nomor tidak diawali 0,
         # urutan blok huruf-angka-huruf): hasil yang melanggar dianggap tidak
@@ -204,6 +217,7 @@ def _process_frame(
 
     if stickers:
         best_sticker = max(stickers, key=lambda d: d.confidence)
+        best_sticker.meta["primary"] = True
         code, confidence, _ = sticker.decode_sticker(best_sticker)
         result.sticker_code = code
         result.sticker_confidence = confidence
