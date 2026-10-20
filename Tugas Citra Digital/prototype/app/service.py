@@ -152,7 +152,7 @@ def _process_frame(
     sticker_enabled: bool = True,
     fast: bool = False,
 ) -> FrameResult:
-    stages = pipeline.preprocess(image)
+    stages = pipeline.preprocess(image, full=not fast)
     gray = stages["gray"]
     sharpness = pipeline.laplacian_variance(gray)
 

@@ -101,6 +101,13 @@ CPU pada laptop i5-8250U berjalan sangat lambat. Untuk training panjang,
 gunakan GPU. `best.pt` dipilih berdasarkan metrik validasi, bukan sekadar epoch
 terakhir.
 
+Pelatihan berhenti otomatis lewat dua mekanisme: `patience` (berhenti bila
+mAP50 tidak membaik) dan `--target-map50` (default `0.98`, nonaktifkan dengan
+`0`) yang menghentikan training segera setelah target mAP50 tercapai —
+mencegah overfitting sekaligus menghemat waktu komputasi. Notebook
+`plat-nomor/a.ipynb` memakai mekanisme yang sama (`TARGET_MAP50 = 0.98`,
+callback `on_fit_epoch_end`).
+
 ### Hasil yang sudah tercatat
 
 Run **V5 `smartgate-colab-v5`** (Colab, YOLOv8n, 50 epoch, dataset gabungan

@@ -133,14 +133,19 @@ def laplacian_variance(gray: Any) -> float:
 
 # --- Pre-processing -----------------------------------------------------------
 
-def preprocess(image: Any, clahe_clip_limit: float | None = None) -> dict[str, Any]:
+def preprocess(image: Any, clahe_clip_limit: float | None = None, full: bool = True) -> dict[str, Any]:
     """CLAHE -> bilateral -> grayscale.
 
     Urutan ini penting: CLAHE memperkuat noise, jadi denoising harus *setelah*
-    CLAHE, bukan sebelumnya.
+    CLAHE, bukan sebelumnya. ``full=False`` melewati CLAHE+bilateral (frame
+    preview cepat di hardware seadanya) dan hanya membuat gray murah untuk
+    metrik ketajaman.
     """
     cv2 = _cv2()
     stages: dict[str, Any] = {"original": image}
+    if not full:
+        stages["gray"] = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        return stages
 
     lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
     l_ch, a_ch, b_ch = cv2.split(lab)
@@ -553,7 +558,10 @@ def detect_plates(image: Any, max_candidates: int = 8) -> list[Detection]:
     tidak, jalur klasik OpenCV di bawah. Pemanggil tidak perlu tahu bedanya.
     """
     from . import detect_yolo
-    detector_image, offset = detection_roi(detection_preprocess(image))
+    # Crop ROI dulu, baru gamma+CLAHE — pemrosesan citra berat hanya pada kotak
+    # kecil plat, bukan seluruh frame CCTV (kunci latensi rendah di CPU standar).
+    roi_image, offset = detection_roi(image)
+    detector_image = detection_preprocess(roi_image)
 
     if detect_yolo.available():
         detections = detect_yolo.detect(detector_image, max_candidates)

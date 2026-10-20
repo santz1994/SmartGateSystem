@@ -35,6 +35,10 @@ def main():
     parser.add_argument("--project", default="runs/detect", help="Project directory")
     parser.add_argument("--name", default="train", help="Run name")
     parser.add_argument("--patience", type=int, default=20, help="Early stopping patience")
+    parser.add_argument(
+        "--target-map50", type=float, default=0.98,
+        help="Stop training otomatis saat val mAP50 mencapai target (0 = nonaktif)",
+    )
     args = parser.parse_args()
 
     data_path = Path(args.data)
@@ -50,6 +54,17 @@ def main():
 
     print(f"Loading base model: {args.model}")
     model = YOLO(args.model)
+
+    # Early stop kustom: berhenti begitu target mAP50 tercapai, agar waktu
+    # komputasi (GPU/Colab) tidak terbuang untuk epoch yang tidak perlu.
+    if args.target_map50 > 0:
+        def stop_at_target(trainer):
+            map50 = (trainer.metrics or {}).get("metrics/mAP50(B)", 0.0)
+            if map50 >= args.target_map50:
+                trainer.stop = True
+                print(f"\nTarget mAP50 {args.target_map50:.2f} tercapai ({map50:.4f}) — training dihentikan.")
+
+        model.add_callback("on_fit_epoch_end", stop_at_target)
 
     print(f"Starting training...")
     print(f"  data: {args.data}")
