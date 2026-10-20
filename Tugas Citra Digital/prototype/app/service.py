@@ -28,6 +28,7 @@ class FrameResult:
     image_path: str | None = None
     plate_text: str | None = None
     plate_confidence: float = 0.0
+    plate_raw_text: str = ""
     sticker_code: str | None = None
     sticker_confidence: float = 0.0
     sharpness: float = 0.0
@@ -188,8 +189,13 @@ def _process_frame(
                 pipeline.closeness(r[0], image.shape),
             ),
         )
-        result.plate_text = text or None
-        result.plate_confidence = confidence
+        result.plate_raw_text = text or ""
+        # Gerbang keras aturan NRKB (bagian depan huruf, nomor tidak diawali 0,
+        # urutan blok huruf-angka-huruf): hasil yang melanggar dianggap tidak
+        # terbaca (fail-safe), bukan ditampilkan apa adanya.
+        if ocr._looks_like_plate(text):
+            result.plate_text = text
+            result.plate_confidence = confidence
         result.ocr_backend = backend
         result.stages["plate_crop"] = best_plate.crop
         result.stages["plate_raw"] = best_plate.meta.get("raw_crop")
@@ -297,6 +303,11 @@ def evaluate(
     )
     if decision == fusion.AUTO_OPEN and match is not None and match["requires_booking"] and booking is None:
         decision, reason = fusion.NO_MATCH, "Kendaraan terdaftar tapi booking tidak aktif"
+    if decision == fusion.OCR_FAILED and plate_text is None and any(f.plate_raw_text for f in frames):
+        reason = (
+            "Hasil OCR tidak sesuai format NRKB (bagian depan huruf, "
+            "nomor tidak diawali 0) — dianggap tidak terbaca"
+        )
     if not db_available:
         reason = "Database tidak tersedia — dialihkan ke satpam (fail-safe)"
 

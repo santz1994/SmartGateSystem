@@ -257,6 +257,10 @@ def test_plate_text_quality_gate() -> None:
     check("nol setelah digit pertama diperbolehkan", ocr._looks_like_plate("DD2060XCL"))
     check("nomor urut valid", ocr.number_group("DD2760XCL") == 2760)
     check("nomor urut nol ditolak", ocr.number_group("DD02760XCL") is None)
+    winner, _ = fusion.vote_plate([("O02760XCL1029", 0.9), ("B 1234 X6", 0.8)])
+    check("voting membuang teks melanggar aturan", winner == "B1234XG", f"(dapat {winner!r})")
+    winner, _ = fusion.vote_plate([("O02760XCL1029", 0.9)])
+    check("voting hanya berisi pelanggar -> tidak terbaca", winner is None)
 
 def test_signed_sticker_token() -> None:
     print("signed sticker token")

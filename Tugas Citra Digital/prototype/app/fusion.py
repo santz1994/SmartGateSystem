@@ -73,8 +73,10 @@ def vote_plate(
         weight = 2.0 if role == "gate" else 1.0
         key = normalize_evidence_text(text)
         if key:
-            from .ocr import normalize_plate
+            from .ocr import normalize_plate, _looks_like_plate
             key = normalize_plate(key)
+            if not _looks_like_plate(key):
+                continue  # buang suara yang melanggar struktur NRKB
             buckets.setdefault(key, []).append((float(confidence), weight))
     if not buckets:
         return None, 0.0

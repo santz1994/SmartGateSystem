@@ -195,7 +195,13 @@ if (camVideo) {
     });
 
   async function scan(persist) {
-    if (busy || !stream || !camVideo.videoWidth) return;
+    if (busy) return;
+    if (!stream || !camVideo.videoWidth) {
+      if (persist) statusEl.textContent = 'Kamera belum siap — klik Aktifkan Kamera dulu.';
+      // Video belum siap: jangan matikan loop auto scan, coba lagi interval berikut.
+      if ($('#cam-auto').checked && stream) scheduleNext();
+      return;
+    }
     busy = true;
     statusEl.textContent = 'Memindai…';
     try {
@@ -230,6 +236,7 @@ if (camVideo) {
       });
       camVideo.srcObject = stream;
       statusEl.textContent = 'Kamera aktif.';
+      if ($('#cam-auto').checked) scheduleNext(true);
     } catch (err) {
       statusEl.textContent = `Kamera gagal: ${err.message}`;
     }
@@ -257,10 +264,16 @@ if (camVideo) {
   $('#cam-plate-toggle').addEventListener('click', (event) => {
     plateEnabled = !plateEnabled;
     updateToggle(event.currentTarget, plateEnabled, 'Plat');
+    statusEl.textContent = plateEnabled
+      ? 'Deteksi plat aktif.'
+      : 'Deteksi plat nonaktif — nomor plat tidak akan dibaca.';
   });
   $('#cam-sticker-toggle').addEventListener('click', (event) => {
     stickerEnabled = !stickerEnabled;
     updateToggle(event.currentTarget, stickerEnabled, 'Stiker');
+    statusEl.textContent = stickerEnabled
+      ? 'Deteksi stiker aktif.'
+      : 'Deteksi stiker nonaktif — stiker tidak akan dibaca.';
   });
   $('#cam-auto').addEventListener('change', (event) => {
     if (event.target.checked) {

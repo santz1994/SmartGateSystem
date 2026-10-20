@@ -176,10 +176,11 @@ def create_app() -> Flask:
                 return jsonify({"error": f"Berkas '{storage.filename}' bukan citra yang valid"}), 400
             images.append((f"manual{index}", image, None))
 
-        def enabled(name: str) -> bool:
-            return request.args.get(name, "1").strip().lower() not in {"0", "false", "off"}
+        def enabled(name: str, default: str = "1") -> bool:
+            return request.args.get(name, default).strip().lower() not in {"0", "false", "off"}
 
-        fast = enabled("fast")
+        # Fast hanya untuk auto scan; unggahan manual & scan simpan-log selalu penuh.
+        fast = enabled("fast", "0")
         result = service.evaluate(
             images,
             source="manual",
