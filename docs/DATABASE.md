@@ -102,7 +102,7 @@ CREATE TYPE gate_decision   AS ENUM ('AUTO_OPEN', 'MANUAL_OVERRIDE', 'REJECTED')
 CREATE TABLE users (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username      VARCHAR(64)  NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,   -- prototipe: PBKDF2-HMAC-SHA256 (lihat app/auth.py)
     full_name     VARCHAR(128) NOT NULL,
     role          user_role    NOT NULL DEFAULT 'SATPAM',
     is_active     BOOLEAN      NOT NULL DEFAULT TRUE,

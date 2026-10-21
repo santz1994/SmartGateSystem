@@ -21,13 +21,23 @@ lihat [docs/PRESENTASI.md](docs/PRESENTASI.md) bagian Rencana Pengembangan.
 
 ```powershell
 cd "Tugas Citra Digital/prototype"
+pip install -r requirements.txt        # inti + backend OCR (PaddleOCR)
+pip install -r requirements-yolo.txt   # opsional: deteksi YOLO
+python tools\fetch_weights.py          # isi bobot ke runs/detect/ (bobot tidak berada di git)
 python run.py
 ```
 
-Buka `http://localhost:5000` (dashboard, `/camera` webcam, `/training`
-monitoring run, `/logs` audit). Backend OCR/ detektor dapat dikonfigurasi lewat
-environment: `SGS_OCR_BACKEND`, `SGS_YOLO_WEIGHTS`, `SGS_DETECTION_ROI`,
-`SGS_CLAHE_CLIP_LIMIT`. Kesehatan sistem: `GET /api/health`.
+Buka `http://localhost:5000` — **login dulu**: semua halaman & `/api/*`
+terproteksi. Akun seed: `admin`/`admin123` (role admin) dan `satpam1`/`satpam123`
+(role satpam). **Ganti password sebelum dipakai di luar localhost** — set env
+`SGS_ADMIN_PASSWORD` / `SGS_SATPAM_PASSWORD` lalu `python run.py --reset-db`.
+Kunci sesi: env `SGS_SECRET_KEY` (disarankan); tanpa env, file `data/secret_key`
+dibuat otomatis.
+
+Environment lain: `SGS_OCR_BACKEND`, `SGS_YOLO_WEIGHTS`, `SGS_DETECTION_ROI`,
+`SGS_CLAHE_CLIP_LIMIT`, `SGS_REQUIRE_SIGNED_STICKER` (default `1` = QR stiker
+wajib bertanda tangan `SGS1.*`). Kesehatan sistem: `GET /api/health` (butuh
+login). Deploy produksi: `waitress-serve --host 127.0.0.1 --port 5000 run:app`.
 
 ## Model Detektor (3 varian, bisa dipilih saat runtime)
 
@@ -63,5 +73,7 @@ cd "Tugas Citra Digital/prototype"
 python tests\test_pipeline.py
 ```
 
-Suite assert tanpa framework (80+ pemeriksaan): aturan NRKB, fusi, voting,
-moiré monitor, dan distraktor layar/video. `pytest` tidak diperlukan.
+Suite assert tanpa framework (97 pemeriksaan): aturan NRKB, fusi, voting,
+moiré monitor, distraktor layar/video, rantai kepercayaan QR, dan identitas
+audit. `pytest` tidak diperlukan. Pemeriksaan bobot YOLO di-skip (bukan gagal)
+bila `runs/detect/` belum diisi `tools/fetch_weights.py`.

@@ -306,6 +306,8 @@ volumes:
 ### 6.3 Variabel Lingkungan (`.env.example`)
 
 ```dotenv
+# Blueprint produksi. Prototipe Flask cukup: SGS_SECRET_KEY (kunci sesi),
+# SGS_ADMIN_PASSWORD/SGS_SATPAM_PASSWORD (akun seed), SGS_STICKER_SIGNING_KEY.
 APP_ENV=production
 TZ=Asia/Jakarta
 DATABASE_URL=postgresql+asyncpg://smartgate:${DB_PASSWORD}@db:5432/smartgate

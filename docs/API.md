@@ -4,6 +4,15 @@
 > **rencana pengembangan mendatang / bahan skripsi**. Lingkup prototipe saat ini:
 > pengenalan plat nomor (YOLOv8 + aturan NRKB + keputusan fail-safe).
 
+> **Status implementasi prototipe:** autentikasi **sudah berjalan** pada
+> prototipe (`Tugas Citra Digital/prototype`) memakai sesi login Flask + password
+> PBKDF2-HMAC-SHA256, role `admin`/`satpam`, proteksi CSRF per sesi, dan identitas
+> audit (`override_by`) diambil dari sesi server — bukan dari body klien.
+> Endpoint nyata: `GET/POST /login`, `POST /logout`. Semua halaman & `/api/*`
+> prototipe menolak akses anonim (401), endpoint admin (403 untuk role lain).
+> Spesifikasi JWT + `X-Internal-Key` di dokumen ini adalah **blueprint produksi**
+> dan belum diimplementasikan pada prototipe.
+
 Referensi: [PRD.md](PRD.md) · [DATABASE.md](DATABASE.md) · [SYSTEM_FLOW.md](SYSTEM_FLOW.md) · [TECHNICAL.md](TECHNICAL.md)
 
 Base URL: `http://gate-backend.local:8000`
