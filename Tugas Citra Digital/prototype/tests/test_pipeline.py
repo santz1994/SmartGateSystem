@@ -365,6 +365,10 @@ def test_model_variant() -> None:
     print("pemilihan model YOLO")
     from app import detect_yolo
 
+    if detect_yolo.weights_path() is None:
+        print("  skip  bobot YOLO tidak ada — jalankan tools/fetch_weights.py dulu")
+        return
+
     detect_yolo.set_variant("yolov8n")
     path_n = detect_yolo.weights_path()
     check("varian yolov8n -> bobot v6-n", path_n is not None and "yolov8n" in str(path_n), f"(dapat {path_n})")

@@ -1,16 +1,16 @@
-# --- Wajib (prototipe jalan penuh) ---
+# --- Inti (wajib: `python run.py` jalan dari instalasi ini) ---
 opencv-python-headless>=4.8
 numpy>=1.24
 Pillow>=10.0
 Flask>=3.0
+waitress>=3.0
 
-# --- OCR produksi ---
-# PaddleOCR adalah backend utama; EasyOCR fallback otomatis.
-easyocr>=1.7
+# Backend OCR default ikut terpasang agar akurasi tidak turun diam-diam.
+-r requirements-ocr.txt
 
-# --- OCR alternatif ---
-paddleocr>=3.0
-paddlepaddle>=3.0
+# Opsional (lihat README):
+#   pip install -r requirements-yolo.txt   # deteksi YOLO (bobot via tools/fetch_weights.py)
+#   pip install -r requirements-dev.txt    # tools/ (unduh sampel, dsb.)
 
 # QR signed token memakai HMAC-SHA256 dari Python standard library; tidak
 # membutuhkan dependency kriptografi tambahan.

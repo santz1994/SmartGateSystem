@@ -1,0 +1,5 @@
+# --- Deteksi plat YOLO (opsional; tanpa ini aplikasi jatuh ke deteksi klasik) ---
+ultralytics>=8.2
+
+# Bobot hasil training TIDAK berada di git (lihat .gitignore). Isi dengan:
+#   python tools/fetch_weights.py

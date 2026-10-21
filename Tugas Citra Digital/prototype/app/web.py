@@ -7,13 +7,13 @@ tiap 3 detik. Untuk prototipe ini cukup, dan menghilangkan satu dependensi.
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, url_for
 
 from . import config, db, detect_yolo, fusion, ocr, pipeline, service, simulate, sticker, vehicles
 
-ROLE_CHOICES = ("satpam1", "admin")
 VEHICLE_TYPES = ("car", "motorcycle", "truck", "custom")
 OWNER_TYPES = ("warga", "karyawan", "tamu")
 

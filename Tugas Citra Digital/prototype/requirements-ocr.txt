@@ -1,0 +1,10 @@
+# --- Backend OCR: pilih SATU, jangan keduanya (masing-masing ratusan MB) ---
+# Default produksi: PaddleOCR (terbukti jauh lebih akurat pada font plat Indonesia).
+paddleocr>=3.0
+paddlepaddle>=3.0
+
+# Alternatif: EasyOCR (dipakai otomatis sebagai fallback bila PaddleOCR tidak
+# terpasang atau gagal inisialisasi).
+# easyocr>=1.7
+
+# AprilTag (opsional, decoder stiker): opencv-contrib-python>=4.8
