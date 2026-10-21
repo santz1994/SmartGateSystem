@@ -6,13 +6,15 @@ tiap 3 detik. Untuk prototipe ini cukup, dan menghilangkan satu dependensi.
 
 from __future__ import annotations
 
+import os
+import secrets
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, url_for
 
-from . import config, db, detect_yolo, fusion, ocr, pipeline, service, simulate, sticker, vehicles
+from . import auth, config, db, detect_yolo, fusion, ocr, pipeline, service, simulate, sticker, vehicles
 
 VEHICLE_TYPES = ("car", "motorcycle", "truck", "custom")
 OWNER_TYPES = ("warga", "karyawan", "tamu")
@@ -41,6 +43,19 @@ TRAIN_PLOTS = (
 )
 
 
+def _secret_key() -> str:
+    """Kunci sesi: ``SGS_SECRET_KEY`` (produksi) atau file acak persisten (demo)."""
+    from_env = os.getenv("SGS_SECRET_KEY", "").strip()
+    if from_env:
+        return from_env
+    path = config.DATA_DIR / "secret_key"
+    if path.is_file():
+        return path.read_text(encoding="utf-8").strip()
+    config.ensure_dirs()
+    value = secrets.token_hex(32)
+    path.write_text(value, encoding="utf-8")
+    return value
+
 def create_app() -> Flask:
     config.ensure_dirs()
     db.init_db()
@@ -57,10 +72,38 @@ def create_app() -> Flask:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = config.MAX_UPLOAD_MB * 1024 * 1024
     app.config["JSON_SORT_KEYS"] = False
+    app.secret_key = _secret_key()
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
+    # --- Login ----------------------------------------------------------------
+
+    @app.get("/login")
+    def login_page() -> str:
+        return render_template("login.html", error=None)
+
+    @app.post("/login")
+    def login_submit() -> Any:
+        try:
+            auth.login((request.form.get("username") or "").strip(), request.form.get("password") or "")
+        except ValueError as exc:
+            return render_template("login.html", error=str(exc)), 401
+        target = request.args.get("next") or ""
+        return redirect(target if target.startswith("/") and not target.startswith("//") else url_for("dashboard"))
+
+    @app.post("/logout")
+    def logout() -> Any:
+        auth.logout()
+        return redirect(url_for("login_page"))
+
+    @app.context_processor
+    def _inject_auth() -> dict[str, Any]:
+        return {"auth": auth}
 
     # --- Halaman --------------------------------------------------------------
 
     @app.get("/")
+    @auth.login_required
     def dashboard() -> str:
         return render_template(
             "dashboard.html",
@@ -75,10 +118,12 @@ def create_app() -> Flask:
         )
 
     @app.get("/upload")
+    @auth.login_required
     def upload_page() -> str:
         return render_template("upload.html", backend=ocr.active_backend())
 
     @app.get("/logs")
+    @auth.login_required
     def logs_page() -> str:
         decision = request.args.get("decision") or None
         return render_template(
@@ -90,6 +135,7 @@ def create_app() -> Flask:
         )
 
     @app.get("/logs/<int:log_id>")
+    @auth.login_required
     def log_detail(log_id: int) -> str:
         row = db.get_gate_log(log_id)
         if row is None:
@@ -105,14 +151,17 @@ def create_app() -> Flask:
         )
 
     @app.get("/camera")
+    @auth.login_required
     def camera_page() -> str:
         return render_template("camera.html", backend=ocr.active_backend())
 
     @app.get("/training")
+    @auth.login_required
     def training_page() -> str:
         return render_template("training.html", status=training_status(), backend=ocr.active_backend())
 
     @app.get("/training/plot/<name>")
+    @auth.login_required
     def training_plot(name: str) -> Any:
         if name not in TRAIN_PLOTS:
             abort(404)
@@ -124,12 +173,15 @@ def create_app() -> Flask:
     # --- Manajemen kendaraan ---------------------------------------------------
 
     @app.get("/vehicles")
+    @auth.login_required
     def vehicles_page() -> str:
         edit_id = request.args.get("edit", type=int)
         row = db.get_vehicle(edit_id) if edit_id else None
         return _vehicles_page(edit=dict(row) if row else None)
 
     @app.post("/vehicles/save")
+    @auth.login_required
+    @auth.admin_required
     def vehicles_save() -> Any:
         vehicle_id = request.form.get("id", type=int)
         fields = {
@@ -156,6 +208,8 @@ def create_app() -> Flask:
         return redirect(url_for("vehicles_page"))
 
     @app.post("/vehicles/<int:vehicle_id>/delete")
+    @auth.login_required
+    @auth.admin_required
     def vehicles_delete(vehicle_id: int) -> Any:
         """Hapus kendaraan; bila sudah tercatat di log audit, cukup nonaktifkan
         agar jejak foto & keputusan tidak putus (FK menolak hard delete)."""
@@ -168,6 +222,7 @@ def create_app() -> Flask:
     # --- API ------------------------------------------------------------------
 
     @app.post("/api/evaluate")
+    @auth.login_required
     def api_evaluate() -> Any:
         """Foto manual: 1..N berkas diunggah, diproses sebagai satu sesi."""
         files = [f for f in request.files.getlist("images") if f and f.filename]
@@ -197,6 +252,7 @@ def create_app() -> Flask:
         return jsonify(result.as_dict())
 
     @app.post("/api/simulate")
+    @auth.login_required
     def api_simulate() -> Any:
         """Simulasi sepasang frame CCTV 1 + CCTV 2."""
         payload = request.get_json(silent=True) or {}
@@ -213,6 +269,7 @@ def create_app() -> Flask:
         return jsonify(result.as_dict())
 
     @app.post("/api/logs/<int:log_id>/action")
+    @auth.login_required
     def api_guard_action(log_id: int) -> Any:
         payload = request.get_json(silent=True) or {}
         ok, message = service.guard_action(
@@ -224,6 +281,7 @@ def create_app() -> Flask:
         return jsonify({"ok": ok, "message": message}), (200 if ok else 400)
 
     @app.get("/api/alerts")
+    @auth.login_required
     def api_alerts() -> Any:
         """Polling dashboard: log terbaru + daftar yang menunggu tindakan."""
         return jsonify(
@@ -235,6 +293,7 @@ def create_app() -> Flask:
         )
 
     @app.get("/api/settings")
+    @auth.login_required
     def api_get_settings() -> Any:
         return jsonify(
             {
@@ -245,6 +304,8 @@ def create_app() -> Flask:
         )
 
     @app.post("/api/settings")
+    @auth.login_required
+    @auth.admin_required
     def api_set_settings() -> Any:
         payload = request.get_json(silent=True) or {}
         updated: dict[str, Any] = {}
@@ -267,6 +328,7 @@ def create_app() -> Flask:
         return jsonify({"updated": updated, "settings": db.settings()})
 
     @app.get("/api/health")
+    @auth.login_required
     def api_health() -> Any:
         return jsonify(
             {
@@ -281,6 +343,7 @@ def create_app() -> Flask:
         )
 
     @app.get("/snapshots/<path:relative>")
+    @auth.login_required
     def snapshot(relative: str) -> Any:
         path = service.snapshot_path(relative)
         if path is None:
@@ -288,6 +351,7 @@ def create_app() -> Flask:
         return send_file(path, mimetype="image/jpeg" if path.suffix == ".jpg" else "image/png")
 
     @app.get("/diagnostics/<path:relative>")
+    @auth.login_required
     def diagnostic(relative: str) -> Any:
         path = service.diagnostic_path(relative)
         if path is None:

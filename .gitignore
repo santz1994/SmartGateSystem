@@ -14,6 +14,7 @@ Tugas Citra Digital/prototype/data/diag/
 Tugas Citra Digital/prototype/data/snapshots/
 Tugas Citra Digital/prototype/data/*.db
 Tugas Citra Digital/prototype/data/*.csv
+Tugas Citra Digital/prototype/data/secret_key
 Tugas Citra Digital/prototype/runs/
 
 # Python

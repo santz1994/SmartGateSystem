@@ -22,6 +22,14 @@
       <a href="{{ url_for('logs_page') }}">Log</a>
       <a href="{{ url_for('api_health') }}" target="_blank">Health</a>
     </nav>
+    {% if auth.current_user() %}
+    <div class="muted">
+      {{ auth.current_user() }} ({{ auth.current_role() }})
+      <form method="post" action="{{ url_for('logout') }}" style="display:inline">
+        <button class="small" type="submit">Keluar</button>
+      </form>
+    </div>
+    {% endif %}
   </header>
 
   <main>

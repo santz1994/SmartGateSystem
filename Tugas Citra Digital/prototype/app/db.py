@@ -7,6 +7,7 @@ migrasi ke PostgreSQL nanti hanya soal DDL, bukan refactor kode.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from contextlib import contextmanager
 from typing import Any, Iterator
@@ -112,6 +113,12 @@ SEED_USERS = [
     ("satpam1", "Budi Santoso", "satpam"),
 ]
 
+# Password akun seed. PROTOTIPE: ganti lewat env sebelum dipakai di jaringan.
+SEED_PASSWORDS = {
+    "admin": os.getenv("SGS_ADMIN_PASSWORD", "admin123"),
+    "satpam1": os.getenv("SGS_SATPAM_PASSWORD", "satpam123"),
+}
+
 SEED_DEVICES = [
     ("CCTV 1 - Zona Pendekatan", "in", "approach", "rtsp://192.168.1.11:554/stream1"),
     ("CCTV 2 - Zona Gate", "in", "gate", "rtsp://192.168.1.12:554/stream1"),
@@ -154,6 +161,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     existing = {row["name"] for row in conn.execute("PRAGMA table_info(detection_events)")}
     if "vehicle_class" not in existing:
         conn.execute("ALTER TABLE detection_events ADD COLUMN vehicle_class TEXT")
+    users_cols = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+    if "password_hash" not in users_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
 
 
 def init_db(force: bool = False) -> None:
@@ -163,8 +173,13 @@ def init_db(force: bool = False) -> None:
     with session() as conn:
         conn.executescript(SCHEMA)
         _migrate(conn)
+        from .auth import hash_password
+
         if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
-            conn.executemany("INSERT INTO users (username, full_name, role) VALUES (?,?,?)", SEED_USERS)
+            conn.executemany(
+                "INSERT INTO users (username, full_name, role, password_hash) VALUES (?,?,?,?)",
+                [(u, n, r, hash_password(SEED_PASSWORDS[u])) for u, n, r in SEED_USERS],
+            )
             conn.executemany(
                 "INSERT INTO gate_devices (name, direction, cctv_role, rtsp_url) VALUES (?,?,?,?)",
                 SEED_DEVICES,
@@ -178,6 +193,12 @@ def init_db(force: bool = False) -> None:
             conn.executemany(
                 "INSERT INTO car_bookings (plate_number, purpose, valid_from, valid_to, status) VALUES (?,?,?,?,?)",
                 SEED_BOOKINGS,
+            )
+        # DB lama (user tanpa password) tetap bisa login: isi hash default sekali.
+        for username, password in SEED_PASSWORDS.items():
+            conn.execute(
+                "UPDATE users SET password_hash = ? WHERE username = ? AND password_hash IS NULL",
+                (hash_password(password), username),
             )
         for key, value in config.DEFAULTS.items():
             conn.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES (?,?)", (key, str(value)))
