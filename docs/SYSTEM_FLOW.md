@@ -1,5 +1,9 @@
 # System Flow — Enterprise Smart Gate System
 
+> **Catatan lingkup:** Fitur stiker QR dan RFID dalam dokumen ini adalah
+> **rencana pengembangan mendatang / bahan skripsi**. Lingkup prototipe saat ini:
+> pengenalan plat nomor (YOLOv8 + aturan NRKB + keputusan fail-safe).
+
 Referensi: [PRD.md](PRD.md) · [DATABASE.md](DATABASE.md) · [API.md](API.md) · [TECHNICAL.md](TECHNICAL.md)
 
 ---

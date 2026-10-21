@@ -334,6 +334,39 @@ def test_distractors() -> None:
         not any(sticker.decode_sticker(s)[0] for s in stickers if s.meta.get("decoder") == "color_patch"),
     )
 
+def test_model_variant() -> None:
+    print("pemilihan model YOLO")
+    from app import detect_yolo
+
+    detect_yolo.set_variant("yolov8n")
+    path_n = detect_yolo.weights_path()
+    check("varian yolov8n -> bobot v6-n", path_n is not None and "yolov8n" in str(path_n), f"(dapat {path_n})")
+    detect_yolo.set_variant("yolo11n")
+    path_x = detect_yolo.weights_path()
+    if detect_yolo.available_variants()["yolo11n"]["ready"]:
+        check("varian yolo11n -> bobot yolo11n", path_x is not None and "yolo11n" in str(path_x), f"(dapat {path_x})")
+    else:
+        check("varian yolo11n tanpa bobot -> fallback ke v6-n", path_x == path_n, f"(dapat {path_x})")
+    detect_yolo.set_variant("yolov8x")
+    if detect_yolo.available_variants()["yolov8x"]["ready"]:
+        check("varian yolov8x -> bobot v6-x", "yolov8x" in str(detect_yolo.weights_path()), f"(dapat {detect_yolo.weights_path()})")
+    detect_yolo.set_variant("yolov8n")
+    check("current_variant kembali yolov8n", detect_yolo.current_variant() == "yolov8n")
+    try:
+        detect_yolo.set_variant("salah")
+        check("varian tak dikenal ditolak", False, "tidak melempar ValueError")
+    except ValueError:
+        check("varian tak dikenal ditolak", True)
+    variants = detect_yolo.available_variants()
+    check(
+        "daftar varian lengkap + bobot siap + metrik evaluasi",
+        set(variants) == {"yolov8n", "yolov8x", "yolo11n"}
+        and variants["yolov8n"]["ready"]
+        and "metrics" in variants["yolov8n"],
+        f"(dapat {variants})",
+    )
+
+
 def main() -> int:
     tests = [
         test_normalize_plate,
@@ -344,6 +377,7 @@ def main() -> int:
         test_pick_primary_plate,
         test_filter_gate_zone,
         test_yolo_quality_gate,
+        test_model_variant,
         test_detection_roi,
         test_plate_text_quality_gate,
         test_signed_sticker_token,

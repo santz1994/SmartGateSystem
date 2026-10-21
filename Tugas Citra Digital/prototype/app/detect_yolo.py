@@ -53,14 +53,72 @@ ASPECT_RANGES = {
 }
 
 
-def _default_weights() -> Path | None:
-    """Pilih bobot training lokal bila operator belum mengatur environment."""
+VARIANT_ENV = "SGS_YOLO_VARIANT"
+VARIANTS: dict[str, str] = {
+    "yolov8n": "runs/detect/smartgate-colab-v6-yolov8n/weights/best.pt",
+    "yolov8x": "runs/detect/smartgate-colab-v6-yolov8x/weights/best.pt",
+    "yolo11n": "runs/detect/smartgate-colab-v6-yolo11n/weights/best.pt",
+}
+FALLBACK_WEIGHTS = (
+    "runs/detect/smartgate-colab-v5/weights/best.pt",
+    "runs/detect/runs/detect/smartgate/weights/best.pt",
+    "runs/detect/runs/detect/smartgate-full/weights/best.pt",
+)
+_variant: str = os.getenv(VARIANT_ENV, "yolov8n")
+
+
+def current_variant() -> str:
+    return _variant
+
+
+def set_variant(name: str) -> None:
+    """Ganti model deteksi aktif (mis. yolov8n vs yolov8x) dan muat ulang bobot."""
+    global _variant
+    if name not in VARIANTS:
+        raise ValueError(f"Varian model tidak dikenal: {name}")
+    _variant = name
+    _model.cache_clear()
+
+
+def available_variants() -> dict[str, dict[str, Any]]:
+    """Daftar varian + status bobot + metrik evaluasi, untuk halaman /training."""
+    import json
+
     base = Path(__file__).resolve().parent.parent
-    for relative in (
-        "runs/detect/smartgate-colab-v5/weights/best.pt",
-        "runs/detect/runs/detect/smartgate/weights/best.pt",
-        "runs/detect/runs/detect/smartgate-full/weights/best.pt",
-    ):
+    out: dict[str, dict[str, Any]] = {}
+    for name, relative in VARIANTS.items():
+        candidate = base / relative
+        ready = candidate.is_file()
+        info: dict[str, Any] = {
+            "weights": str(candidate),
+            "ready": ready,
+            "size_mb": round(candidate.stat().st_size / 1e6, 1) if ready else 0,
+        }
+        summary_path = candidate.parent.parent / "evaluation_summary.json"
+        if summary_path.is_file():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                bench = summary.get("ocr_and_gate_benchmark", {})
+                info["metrics"] = {
+                    "test_map50": summary.get("test", {}).get("mAP50"),
+                    "test_map50_95": summary.get("test", {}).get("mAP50_95"),
+                    "valid_format_rate": bench.get("valid_format_rate"),
+                    "latency_avg_ms": bench.get("avg_end_to_end_latency_ms"),
+                    "latency_p95_ms": bench.get("p95_end_to_end_latency_ms"),
+                }
+            except (OSError, ValueError):
+                pass
+        out[name] = info
+    return out
+
+
+def _default_weights() -> Path | None:
+    """Pilih bobot training lokal: varian aktif dulu, lalu kandidat lain."""
+    base = Path(__file__).resolve().parent.parent
+    relatives = [VARIANTS[_variant]]
+    relatives += [rel for name, rel in VARIANTS.items() if name != _variant]
+    relatives += [rel for rel in FALLBACK_WEIGHTS if rel not in relatives]
+    for relative in relatives:
         candidate = base / relative
         if candidate.is_file():
             return candidate

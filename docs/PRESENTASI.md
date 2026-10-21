@@ -33,7 +33,7 @@ flowchart TD
     D --> E["5. OCR membaca teks plat<br/>(EasyOCR + koreksi aturan NRKB)"]
     E --> F{"6. Teks sesuai aturan plat Indonesia?"}
     F -- Tidak --> G["Dianggap TIDAK TERBACA<br/>(diserahkan ke satpam)"]
-    F -- Ya --> H["7. Gabung bukti:<br/>voting antar-frame + stiker QR"]
+    F -- Ya --> H["7. Gabung bukti:<br/>voting antar-frame"]
     H --> I{"8. Cocok dengan database kendaraan?"}
     I -- Cocok & yakin --> J["AUTO_OPEN<br/>gerbang terbuka otomatis + log"]
     I -- Cocok tapi ragu --> K["LOW_CONFIDENCE<br/>satpam konfirmasi"]
@@ -81,9 +81,9 @@ bukan ditampilkan seadanya. Lebih baik "tidak terbaca" (satpam yang cek)
 daripada salah baca yang membuka gerbang untuk kendaraan yang salah.
 
 ### Tahap 6–8 — Keputusan
-Beberapa frame di-*vote* (mayoritas menang), bukti plat + stiker QR digabung,
-lalu dicocokkan ke database. Hanya bila **identitas jelas, keyakinan tinggi,
-dan data cocok** gerbang membuka sendiri. Selain itu, satpam yang memutuskan.
+Beberapa frame di-*vote* (mayoritas menang) untuk menguatkan bacaan, lalu
+dicocokkan ke database. Hanya bila **identitas jelas, keyakinan tinggi, dan data
+cocok** gerbang membuka sendiri. Selain itu, satpam yang memutuskan.
 
 ---
 
@@ -92,7 +92,7 @@ dan data cocok** gerbang membuka sendiri. Selain itu, satpam yang memutuskan.
 | Situasi | Keputusan | Aksi |
 | --- | --- | --- |
 | Plat valid, conf ≥ 0,85, terdaftar | **AUTO_OPEN** | Gerbang buka otomatis |
-| Plat/stiker valid tapi conf rendah | **LOW_CONFIDENCE** | Satpam konfirmasi |
+| Plat valid tapi conf rendah | **LOW_CONFIDENCE** | Satpam konfirmasi |
 | Terbaca tapi tidak terdaftar | **NO_MATCH** | Satpam putuskan |
 | Gagal baca / melanggar format | **OCR_FAILED** | Satpam putuskan |
 | Satpam menilai aman | **MANUAL_OVERRIDE** | Buka manual + catat identitas satpam |
@@ -172,9 +172,34 @@ diam-diam.
 Jalan di PC standar (tanpa GPU khusus): rata-rata 98 ms per frame. Seluruh
 optimasi (crop-only CLAHE, frame skipping, ONNX) hadir agar target ini tercapai.
 
+**Q: Kenapa YOLOv11n, bukan yang paling besar (v8x)?**
+Kami membandingkan tiga arsitektur pada dataset dan konfigurasi yang sama:
+YOLOv8n, YOLOv8x, dan YOLOv11n. Hasilnya, YOLOv11n (paling ringan, 5,5 MB)
+justru unggul keseluruhan — Test mAP50 0,9683, valid-format OCR 75%, latensi
+setara v8n. YOLOv8x unggul tipis di deteksi atas v8n tetapi OCR-nya paling
+tidak stabil dan 2× lebih lambat. Konsisten dengan Ramadhani dkk. (2026):
+akurasi deteksi tidak otomatis berarti akurasi OCR lebih baik. Ketiganya bisa
+dibandingkan langsung di aplikasi lewat pemilih model di `/training`.
+
 ---
 
-## 9. Penutup
+## 9. Rencana Pengembangan / Bahan Skripsi
+
+Di luar lingkup prototipe saat ini — kode dan materinya sudah disiapkan:
+
+1. **Stiker QR bertanda tangan** — bukti kendaraan kedua (implementasi tersedia
+   sebagai fondasi, nonaktif dari lingkup utama).
+2. **Integrasi RFID + mikrokontroler (ESP32)** — buka gerbang via kartu, kontrol
+   relay langsung dari sistem.
+3. **Recognizer OCR khusus font TNKB** — data latih sudah tersedia:
+   `dataset_extra/ocr_reference/plate_text_dataset` + glyph `alpr`.
+4. **Pelacakan multi-kendaraan (ByteTrack/DeepSORT)** untuk antrean.
+5. **Active learning** dari citra gagal terbaca (`ocr_failed/`) untuk
+   pelatihan ulang berkala.
+
+---
+
+## 10. Penutup
 
 Smart Gate System membuktikan bahwa pengenalan plat nomor yang **cepat, akurat,
 dan aman** bisa dibangun dengan hardware seadanya: AI mengerjakan pekerjaan

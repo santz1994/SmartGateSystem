@@ -215,6 +215,13 @@ def set_setting(key: str, value: float) -> None:
     _settings_cache.clear()
 
 
+def raw_setting(key: str, default: str = "") -> str:
+    """Ambil nilai setting non-numerik (mis. varian model) apa adanya."""
+    with session() as conn:
+        row = conn.execute("SELECT value FROM system_settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
 def find_vehicle(plate_text: str | None, sticker_code: str | None) -> sqlite3.Row | None:
     """Cocokkan plat ATAU stiker ke master_vehicles yang aktif & belum kedaluwarsa."""
     clauses, params = [], []

@@ -1,5 +1,9 @@
 # Product Requirements Document (PRD): Enterprise Smart Gate System
 
+> **Catatan lingkup:** Fitur stiker QR dan RFID dalam dokumen ini adalah
+> **rencana pengembangan mendatang / bahan skripsi**. Lingkup prototipe saat ini:
+> pengenalan plat nomor (YOLOv8 + aturan NRKB + keputusan fail-safe).
+
 ## 1. Ikhtisar Produk
 **Nama Produk:** Enterprise Smart Gate System
 **Tujuan Utama:** Mengotomatisasi akses gerbang dengan tingkat keberhasilan tinggi melalui fusi citra ganda (**CCTV 1 + CCTV 2**: OCR plat nomor & deteksi stiker khusus) serta menyediakan antarmuka *fallback* manual (*Dashboard* Satpam) yang terintegrasi dengan modul pemesanan kendaraan (Car Booking) dan master data warga/karyawan.

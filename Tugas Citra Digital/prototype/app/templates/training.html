@@ -32,6 +32,38 @@
 </section>
 
 <section class="card">
+  <h3>Pilih Model Deteksi Aktif</h3>
+  <p class="muted">
+    Bandingkan hasil training (mis. YOLOv8n vs YOLOv8x) tanpa ganti kode:
+    pilih model lalu klik Aktifkan. Bobot dimuat ulang otomatis.
+  </p>
+  <form id="model-form">
+    {% for name, info in status.variants.items() %}
+    <label style="display:block;margin-bottom:.6em">
+      <input type="radio" name="yolo_variant" value="{{ name }}"
+             {% if name == status.active_variant %}checked{% endif %}
+             {% if not info.ready %}disabled{% endif %}>
+      <strong>{{ name }}</strong>
+      {% if info.ready %}<span class="badge GREEN">siap ({{ info.size_mb }} MB)</span>
+      {% else %}<span class="badge AMBER">bobot belum ada</span>{% endif %}
+      {% if info.metrics %}
+      <span class="muted small">
+        test mAP50 {{ '%.3f'|format(info.metrics.test_map50) }} ·
+        OCR valid {{ '%.1f'|format(info.metrics.valid_format_rate * 100) }}% ·
+        latency {{ info.metrics.latency_avg_ms }} ms (P95 {{ info.metrics.latency_p95_ms }} ms)
+      </span>
+      {% endif %}
+    </label>
+    {% endfor %}
+    <button type="submit">Aktifkan</button>
+  </form>
+  <p class="muted small">
+    Backend aktif: <strong>{{ status.plate_backend.backend }}</strong>
+    {% if status.plate_backend.weights %} — {{ status.plate_backend.weights }}{% endif %}
+  </p>
+</section>
+
+<section class="card">
   <h3>Riwayat Epoch</h3>
   <table class="data">
     <thead>
@@ -65,4 +97,23 @@
   </div>
   {% endfor %}
 </section>
+
+<script>
+  document.getElementById('model-form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const picked = document.querySelector('input[name="yolo_variant"]:checked');
+    if (!picked) return;
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ yolo_variant: picked.value }),
+    });
+    if (res.ok) {
+      location.reload();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || 'Gagal mengganti model');
+    }
+  });
+</script>
 {% endblock %}

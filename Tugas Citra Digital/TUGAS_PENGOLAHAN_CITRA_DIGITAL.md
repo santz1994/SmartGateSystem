@@ -1,7 +1,7 @@
 # Tugas Pengolahan Citra Digital: Smart Gate System
 
 **Mata kuliah:** Pengolahan Citra Digital
-**Sistem:** Prototype akses gerbang berbasis plat nomor dan stiker
+**Sistem:** Prototype akses gerbang berbasis plat nomor
 **Status:** Implementasi dan evaluasi bertahap
 
 ## 1. Latar Belakang
@@ -9,10 +9,9 @@
 Smart Gate System mengidentifikasi kendaraan tanpa kontak fisik. CCTV 1
 menangkap kendaraan pada zona pendekatan, sedangkan CCTV 2 menangkap kendaraan
 di dekat gate. Kedua sumber dapat menghasilkan lebih dari satu gambar untuk
-diproses bersama. Plat nomor dibaca dengan OCR dan stiker khusus digunakan
-sebagai bukti tambahan.
+diproses bersama. Plat nomor dibaca dengan OCR dan koreksi aturan NRKB.
 
-Jika plat/stiker cocok dengan database kendaraan aktif dan confidence memenuhi
+Jika plat cocok dengan database kendaraan aktif dan confidence memenuhi
 aturan, sistem menghasilkan `AUTO_OPEN`. Jika plat gagal dibaca atau tidak
 cocok, sistem menghasilkan `NO_MATCH` atau `OCR_FAILED`, memberi alert kepada
 satpam, dan tidak membuka gate otomatis. Satpam dapat memilih `MANUAL_OVERRIDE`
@@ -38,9 +37,7 @@ flowchart LR
   S --> D[YOLO deteksi plat / OpenCV fallback]
   D --> P[Crop, deskew, deglare, CLAHE, resize]
   P --> O[PaddleOCR/EasyOCR + voting + aturan NRKB]
-  D --> K[Deteksi/dekode stiker]
-  O --> F[Fusi bukti]
-  K --> F
+  O --> F[Fusi bukti (voting antar-frame)]
   F --> DB[Pencocokan master_vehicles]
   DB -->|cocok dan valid| OPEN[AUTO_OPEN]
   DB -->|gagal/tidak cocok| ALERT[NO_MATCH / OCR_FAILED]
@@ -167,23 +164,52 @@ Rentang nomor kendaraan (1--1999 mobil penumpang, 2000--6999 sepeda motor,
 7000--7999 bus, 8000--8999 barang, 9000--9999 khusus) hanya menjadi petunjuk
 tambahan. Sumber referensi: [Bapenda Jawa Barat](https://bapenda.jabarprov.go.id/2017/10/24/kenali-penomoran-kendaraan-bermotor/).
 
-### 5.4 Stiker
+### 5.4 Stiker (rencana pengembangan)
 
-Stiker/QR/pola khusus diproses sebagai bukti kedua. Stiker yang sesuai dapat
-menambah confidence, tetapi tidak boleh mengabaikan kontrol database dan aturan
-fail-safe. Implementasi prototype menyediakan deteksi stiker/fallback; kelas
-stiker belum termasuk dalam `dataset_merged` satu kelas. Blok warna jenuh
-hasil fallback hanya menjadi bukti bila berhasil didekode — kandidat yang
-gagal didekode dibuang agar objek berwarna di latar (mis. video/layar) tidak
+Stiker QR bertanda tangan direncanakan sebagai bukti kedua untuk kendaraan
+terdaftar. Implementasi prototype menyediakan deteksi stiker sebagai fondasi,
+tetapi **di luar lingkup prototipe saat ini** (masuk rencana pengembangan
+mendatang / bahan skripsi, bersama integrasi RFID). Blok warna jenuh hasil
+fallback hanya menjadi bukti bila berhasil didekode — kandidat yang gagal
+didekode dibuang agar objek berwarna di latar (mis. video/layar) tidak
 berubah menjadi kotak stiker palsu.
+
+### 5.5 Perbandingan Arsitektur Detektor
+
+Tiga arsitektur dilatih pada dataset, konfigurasi, dan seed yang sama
+(50 epoch, T4, `seed=42`) sebagai studi pembanding. Ketiganya dapat diuji
+langsung di aplikasi lewat pemilih model di halaman `/training`:
+
+| Metrik | YOLOv8n | YOLOv8x | YOLOv11n |
+| --- | ---: | ---: | ---: |
+| Val mAP50 | 0,9194 | 0,9338 | 0,9361 |
+| Test mAP50 | 0,9564 | 0,9580 | 0,9683 |
+| Test mAP50-95 | 0,6309 | 0,5824 | 0,6292 |
+| Valid format OCR | 72,03% | 67,52% | 75,00% |
+| Latency avg / P95 | 96 / 176 ms | 189 / 263 ms | 100 / 192 ms |
+| Bobot best.pt | 6,5 MB | 136,7 MB | 5,5 MB |
+
+Temuan:
+1. **YOLOv11n unggul keseluruhan** — mAP50 tertinggi, OCR paling stabil, bobot
+   paling kecil, latensi setara YOLOv8n. Arsitektur generasi baru lebih
+   efisien daripada sekadar memperbesar model (YOLOv8x).
+2. YOLOv8x unggul tipis di deteksi atas YOLOv8n tetapi kalah di stabilitas
+   OCR dan 2× lebih lambat — konsisten dengan Ramadhani dkk. (2026): akurasi
+   deteksi tidak otomatis berarti akurasi OCR lebih baik.
+3. Ukuran model tidak linear dengan kualitas baca; pemilihan arsitektur harus
+   diukur end-to-end (mAP + valid-format rate + latensi).
+
+Arsip data pembanding: `smartgate-artifacts-Y8N/Y8X/Y11N.zip` di root
+repositori (bobot + `evaluation_summary.json` + `results.csv` + confusion
+matrix masing-masing).
 
 ## 6. Keputusan Sistem
 
 | Kode | Kondisi | Output |
 | --- | --- | --- |
-| `AUTO_OPEN` | Plat/stiker valid dan cocok di database | Perintah buka pintu otomatis dan log foto |
+| `AUTO_OPEN` | Plat valid dan cocok di database | Perintah buka pintu otomatis dan log foto |
 | `NO_MATCH` | Teks terbaca tetapi tidak terdaftar | Alert kendaraan tidak dikenali |
-| `OCR_FAILED` | Plat dan stiker tidak cukup terbaca | Alert kendaraan tidak dikenali |
+| `OCR_FAILED` | Plat tidak cukup terbaca | Alert kendaraan tidak dikenali |
 | `MANUAL_OVERRIDE` | Satpam memverifikasi aman | Bypass buka manual, wajib audit |
 | `REJECTED` | Satpam menilai tidak aman | Gate tetap tertutup, simpan alasan |
 
@@ -208,18 +234,20 @@ tercapai — callback `on_fit_epoch_end` yang sama dipasang di notebook
 `plat-nomor/a.ipynb` (`TARGET_MAP50 = 0.98`) sehingga waktu komputasi
 GPU/Colab tidak terbuang untuk epoch yang tidak perlu.
 
-Run **V5 `smartgate-colab-v5`** (Colab, YOLOv8n, 50 epoch, dataset gabungan
-Roboflow + Kaggle COCO + background) adalah run aktif dengan hasil terbaik
-sejauh ini:
+Run **V6 `smartgate-colab-v6-yolo11n`** (Colab T4, 50 epoch, dataset gabungan
+final 3.982 gambar) adalah run aktif dengan hasil terbaik sejauh ini:
 
 | Metrik | Nilai |
 | --- | ---: |
-| Validation mAP50 | 0,8938 |
-| Validation mAP50-95 | 0,5339 |
-| Test mAP50 | 0,9491 |
-| Test mAP50-95 | 0,5999 |
-| Valid format rate OCR (V4 parser) | 73,95% (88/119 plat) |
-| Latency rata-rata / P95 | 98,22 ms / 176,99 ms |
+| Validation mAP50 | 0,9361 |
+| Validation mAP50-95 | 0,5536 |
+| Test mAP50 | 0,9683 |
+| Test mAP50-95 | 0,6292 |
+| Valid format rate OCR (V4 parser) | 75,00% (87/116 plat) |
+| Latency rata-rata / P95 | 99,63 ms / 192,41 ms |
+
+Run V5 `smartgate-colab-v5` (YOLOv8n, dataset lama) sebelumnya: Test mAP50
+0,9491, valid format 73,95% (88/119 plat), latency 98,22/176,99 ms.
 
 Run awal 15 epoch lokal menghasilkan kira-kira precision 0,714, recall 0,668,
 mAP50 0,716, dan mAP50-95 0,435; run `smartgate-full` (4 epoch) berhenti pada
@@ -229,7 +257,7 @@ mAP50 sementara 0,6671 — keduanya hanya baseline historis. Halaman
 Bobot dipasang melalui:
 
 ```powershell
-$env:SGS_YOLO_WEIGHTS = "D:\Project\Smart Gate System\Tugas Citra Digital\prototype\runs\detect\smartgate-colab-v5\weights\best.pt"
+$env:SGS_YOLO_VARIANT = "yolo11n"   # atau yolov8n / yolov8x — juga bisa diganti di halaman /training
 python run.py
 ```
 
@@ -261,9 +289,10 @@ klasik dapat memecah plat menjadi fragmen.
 
 Untuk pantulan monitor, `SGS_CLAHE_CLIP_LIMIT` dapat diturunkan agar pola moire
 tidak terlalu diperkuat. Beberapa frame dari kendaraan yang sama dinormalisasi
-lebih dahulu, kemudian hasil mayoritas dipilih. Jika plat dan stiker mengarah
+lebih dahulu, kemudian hasil mayoritas dipilih. Jika sumber berbeda mengarah
 ke dua kendaraan berbeda, hasil tersebut ditolak sebagai konflik bukti dan
-tidak boleh `AUTO_OPEN`.
+tidak boleh `AUTO_OPEN`. Stiker QR dan RFID direncanakan sebagai bukti
+tambahan pada tahap pengembangan mendatang / bahan skripsi.
 
 ## 9. Keterbatasan dan Pengembangan
 
@@ -288,6 +317,9 @@ rekaman CCTV nyata yang mencakup siang, malam, hujan, pantulan, dan kendaraan
 tidak terdaftar.
 
 ## Referensi
+
+1. Ramadhani, A. D., Amami, A. F., Lesmono, A. N., Pramulen, A. S., Nadziroh, F., dan Segara, A. J. T. (2026). *Analisis Akurasi Pembacaan Karakter Plat Nomor Kendaraan Indonesia Menggunakan YOLOv8 dan EASYOCR*. **Jurnal Teknika**, 18(2), 147–154. DOI: 10.30736/jt.v18i2.1604. — Temuan: YOLOv8x unggul mAP@0.5 (0,951) tetapi YOLOv8n menghasilkan pembacaan OCR lebih stabil (bbox lebih lebar); akurasi deteksi ≠ akurasi OCR.
+2. Nurjannah, E., Rahman, S. S., Awalia, R., Andini, H., dan Zahra, N. A. (2025). *Deteksi Plat Motor Dengan Mudah Menggunakan EasyOCR Dalam Pengolahan Citra Digital*. **Politeknik Bosowa**, 7(2). P-ISSN 2685-4868. — Pemanfaatan EasyOCR untuk deteksi teks plat motor, akurasi rata-rata 97,0% (10 sampel).
 
 1. Ultralytics, dokumentasi YOLO.
 2. PaddleOCR, dokumentasi dan model recognizer (EasyOCR tetap didukung sebagai opsi).

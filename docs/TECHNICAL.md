@@ -1,5 +1,9 @@
 # Technical Document — Enterprise Smart Gate System
 
+> **Catatan lingkup:** Fitur stiker QR dan RFID dalam dokumen ini adalah
+> **rencana pengembangan mendatang / bahan skripsi**. Lingkup prototipe saat ini:
+> pengenalan plat nomor (YOLOv8 + aturan NRKB + keputusan fail-safe).
+
 Referensi: [PRD.md](PRD.md) · [DATABASE.md](DATABASE.md) · [SYSTEM_FLOW.md](SYSTEM_FLOW.md) · [API.md](API.md)
 
 ---
@@ -201,6 +205,23 @@ sebagai tidak terbaca — bukan ditampilkan apa adanya — dan confidence-nya
 tidak dihitung ke skor fusi.
 
 ---
+
+### 5.5 Pemilihan Varian Model Deteksi
+
+Tiga bobot custom tersedia dan dapat ditukar saat runtime (model dimuat ulang
+otomatis): `yolov8n`, `yolov8x`, `yolo11n` — dipetakan di
+`app/detect_yolo.py::VARIANTS` ke
+`runs/detect/smartgate-colab-v6-<varian>/weights/best.pt`.
+
+- Pilih lewat halaman **/training** ("Pilih Model Deteksi Aktif") atau
+  `POST /api/settings {"yolo_variant": "yolo11n"}`.
+- Persistensi: `system_settings.yolo_variant` (dipulihkan saat aplikasi start).
+- Override lingkungan: `SGS_YOLO_VARIANT` (nama varian) atau `SGS_YOLO_WEIGHTS`
+  (path bobot penuh, prioritas tertinggi).
+- Fallback aman: bobot varian belum ada → kandidat berikutnya (varian lain →
+  run V5 → run legacy).
+- Metrik evaluasi tiap varian (`evaluation_summary.json` di folder run)
+  ditampilkan di `/training` untuk perbandingan kecepatan/ketepatan.
 
 ## 6. Deployment
 

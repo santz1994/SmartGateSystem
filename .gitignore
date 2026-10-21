@@ -6,7 +6,7 @@ Tugas Citra Digital/prototype/dataset_merged/
 Tugas Citra Digital/prototype/dataset_extra/
 Tugas Citra Digital/prototype/plat-nomor/**
 !Tugas Citra Digital/prototype/plat-nomor/data.yaml
-!Tugas Citra Digital/prototype/plat-nomor/a.ipynb
+!Tugas Citra Digital/prototype/plat-nomor/*.ipynb
 /_stage_smartgate_indonesia_training
 
 # Data runtime
@@ -28,7 +28,8 @@ venv/
 Thumbs.db
 .DS_Store
 
-# Zip
+# Zip & artefak training (bobot/unduhan, terlalu besar)
 *.zip
+smartgate-artifacts*/
 dataset_merged_colab.zip
 smartgate-colab-2-results.zip

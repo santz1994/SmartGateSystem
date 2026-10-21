@@ -86,20 +86,49 @@ terlihat tinggi karena kebocoran frame.
 
 ```powershell
 pip install ultralytics
-python train_yolo.py --data dataset_merged/data.yaml --epochs 50 `
+python train_yolo.py --data plat-nomor/data.yaml --epochs 50 `
   --imgsz 640 --batch 16 --device 0 --name smartgate-gpu
 ```
 
 ### CPU lokal
 
 ```powershell
-python train_yolo.py --data dataset_merged/data.yaml --epochs 15 `
+python train_yolo.py --data plat-nomor/data.yaml --epochs 15 `
   --imgsz 416 --batch 8 --device cpu --patience 5 --name smartgate
 ```
 
 CPU pada laptop i5-8250U berjalan sangat lambat. Untuk training panjang,
 gunakan GPU. `best.pt` dipilih berdasarkan metrik validasi, bukan sekadar epoch
 terakhir.
+
+### Kaggle
+
+Dataset gabungan sudah tersedia di [`plat-nomor/`](plat-nomor/) (train 3.982 /
+valid 84 / test 84, dibangun dari semua sumber dengan anti-leakage SHA-256 oleh
+[`tools/merge_datasets.py`](tools/merge_datasets.py)). Untuk Kaggle, unggah
+**`smartgate-dataset-merged.zip`** (di root repo, 677 MB, siap pakai) sebagai
+satu **Kaggle Dataset** lalu Add Data ke notebook — `a_kaggle.ipynb` otomatis
+mendeteksinya dan melewati tahap merge.
+
+Gunakan notebook [`plat-nomor/a_kaggle.ipynb`](plat-nomor/a_kaggle.ipynb)
+(versi Kaggle dari `a.ipynb`, tanpa dependensi Colab):
+
+1. Buat notebook baru di Kaggle, tempel isi `a_kaggle.ipynb`.
+2. Panel kanan **Settings > Accelerator > GPU T4** (atau GPU T4 x2), **Internet ON**
+   (bila pip gagal dengan `Temporary failure in name resolution`, Internet masih
+   OFF — aktifkan lalu jalankan ulang sel). Sel setup hanya memasang paket yang
+   belum ada di image kernel, jadi aman dijalankan berulang.
+3. Dataset sudah di-**Add Data > Datasets** ke notebook — dibaca dari
+   `/kaggle/input/`, tidak butuh Internet.
+4. **Save & Run All**. Training berhenti otomatis saat `TARGET_MAP50` (0,98)
+   tercapai atau `patience=15` tanpa perbaikan. Untuk perbandingan
+   **YOLOv8n vs YOLOv11n**, ganti `BASE_MODEL` di sel training
+   (`'yolov8n.pt'` / `'yolo11n.pt'`) lalu jalankan dua kali — nama run otomatis
+   `smartgate-kaggle-v6-yolov8n` / `-yolo11n`, bandingkan kedua
+   `evaluation_summary.json`.
+5. Klik **Save Version (Commit)** — setelah selesai, unduh
+   `smartgate-artifacts.zip` dari tab **Output**, lalu salin `best.pt` ke
+   `runs/detect/smartgate-kaggle-v6/weights/` dan set `SGS_YOLO_WEIGHTS`.
 
 Pelatihan berhenti otomatis lewat dua mekanisme: `patience` (berhenti bila
 mAP50 tidak membaik) dan `--target-map50` (default `0.98`, nonaktifkan dengan
@@ -109,6 +138,39 @@ mencegah overfitting sekaligus menghemat waktu komputasi. Notebook
 callback `on_fit_epoch_end`).
 
 ### Hasil yang sudah tercatat
+
+> Run baru (dataset gabungan final di `plat-nomor/`) bernama
+> `smartgate-colab-v6-yolov8n` (Colab) / `smartgate-kaggle-v6-yolov8n`
+> (Kaggle); ganti `BASE_MODEL` ke `'yolo11n.pt'` untuk pembanding YOLOv11n
+> (lebih ringan dari v8n, akurasi setara/lebih baik — generasi baru).
+> Setelah run yolo11n selesai, salin `best.pt` ke
+> `runs/detect/smartgate-colab-v6-yolo11n/weights/` — model aktif bisa dipilih
+> dari halaman **/training** (bagian "Pilih Model Deteksi Aktif"), tersimpan
+> di `system_settings` (`yolo_variant`).
+
+**Perbandingan 3 arsitektur detektor** (dataset gabungan final, 50 epoch, T4,
+`seed=42`, run `smartgate-colab-v6-*`; arsip `smartgate-artifacts-Y8N/Y8X/Y11N.zip`
+di root repositori):
+
+| Metrik | YOLOv8n | YOLOv8x | YOLOv11n | Pemenang |
+| --- | ---: | ---: | ---: | --- |
+| Val mAP50 | 0,9194 | 0,9338 | **0,9361** | yolo11n |
+| Val mAP50-95 | **0,5635** | 0,5572 | 0,5536 | v8n |
+| Test mAP50 | 0,9564 | 0,9580 | **0,9683** | yolo11n |
+| Test mAP50-95 | **0,6309** | 0,5824 | 0,6292 | v8n |
+| Valid format OCR | 72,03% (85/118) | 67,52% (79/117) | **75,00%** (87/116) | yolo11n |
+| Latency avg / P95 | 96 / 176 ms | 189 / 263 ms | 100 / 192 ms | v8n (yolo11n setara) |
+| Bobot best.pt | 6,5 MB | 136,7 MB | **5,5 MB** | yolo11n |
+
+Kesimpulan:
+1. **YOLOv11n unggul keseluruhan** — Test mAP50 tertinggi, OCR paling stabil,
+   bobot paling kecil, latensi setara v8n. Arsitektur generasi baru lebih
+   efisien daripada sekadar memperbesar model (v8x).
+2. YOLOv8x unggul tipis di deteksi atas v8n tetapi kalah di stabilitas OCR
+   dan 2× lebih lambat — konsisten dengan Ramadhani dkk. (2026): akurasi
+   deteksi tidak otomatis berarti akurasi OCR lebih baik.
+3. Ketiganya bisa diuji langsung di aplikasi lewat **/training → Pilih Model
+   Deteksi Aktif** (metrik tiap model tampil di pilihan).
 
 Run **V5 `smartgate-colab-v5`** (Colab, YOLOv8n, 50 epoch, dataset gabungan
 Roboflow + Kaggle COCO + background dengan anti-leakage) adalah run aktif saat

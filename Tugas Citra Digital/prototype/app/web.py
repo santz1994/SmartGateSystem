@@ -45,6 +45,11 @@ def create_app() -> Flask:
     config.ensure_dirs()
     db.init_db()
 
+    try:
+        detect_yolo.set_variant(db.raw_setting("yolo_variant", "yolov8n"))
+    except ValueError:
+        pass  # nilai tersimpan tidak valid -> pakai default
+
     import threading
 
     threading.Thread(target=ocr.warmup, daemon=True).start()  # model siap sebelum scan pertama
@@ -231,12 +236,26 @@ def create_app() -> Flask:
 
     @app.get("/api/settings")
     def api_get_settings() -> Any:
-        return jsonify(db.settings())
+        return jsonify(
+            {
+                **db.settings(),
+                "yolo_variant": detect_yolo.current_variant(),
+                "yolo_variants": detect_yolo.available_variants(),
+            }
+        )
 
     @app.post("/api/settings")
     def api_set_settings() -> Any:
         payload = request.get_json(silent=True) or {}
-        updated = {}
+        updated: dict[str, Any] = {}
+        if "yolo_variant" in payload:
+            variant = str(payload.pop("yolo_variant"))
+            try:
+                detect_yolo.set_variant(variant)
+            except ValueError:
+                return jsonify({"error": f"Varian model tidak dikenal: {variant}"}), 400
+            db.set_setting("yolo_variant", variant)
+            updated["yolo_variant"] = variant
         for key, value in payload.items():
             if key not in config.DEFAULTS:
                 continue
@@ -314,6 +333,9 @@ def training_status() -> dict[str, Any]:
         "plots": [name for name in TRAIN_PLOTS if (TRAIN_RUN_DIR / name).is_file()],
         "weights_ready": weights.is_file(),
         "weights_size_mb": round(weights.stat().st_size / 1e6, 1) if weights.is_file() else 0,
+        "variants": detect_yolo.available_variants(),
+        "active_variant": detect_yolo.current_variant(),
+        "plate_backend": detect_yolo.status(),
     }
 
 def _validate_vehicle(fields: dict[str, Any]) -> str | None:
