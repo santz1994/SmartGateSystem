@@ -275,7 +275,7 @@ def create_app() -> Flask:
         ok, message = service.guard_action(
             log_id,
             str(payload.get("action", "")),
-            str(payload.get("username") or "satpam1"),
+            auth.current_user() or "",  # identitas dari sesi server, bukan body (C2)
             str(payload.get("note") or ""),
         )
         return jsonify({"ok": ok, "message": message}), (200 if ok else 400)

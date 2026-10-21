@@ -125,7 +125,6 @@ document.querySelectorAll('button[data-action]').forEach((button) => {
     }
     const { ok, data } = await postJSON(`/api/logs/${button.dataset.log}/action`, {
       action: button.dataset.action,
-      username: $('#guard-user').value,
       note,
     });
     $('#guard-msg').textContent = data.message;

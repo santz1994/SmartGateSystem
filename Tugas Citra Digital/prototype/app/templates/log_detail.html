@@ -33,10 +33,7 @@
     <h2>Tindakan Satpam</h2>
     <p class="muted">Bypass dan penolakan wajib disertai catatan — tercatat permanen di log audit.</p>
     <label>Petugas
-      <select id="guard-user">
-        <option value="satpam1">satpam1 — Budi Santoso</option>
-        <option value="admin">admin — Administrator</option>
-      </select>
+      <input value="{{ auth.current_user() }} ({{ auth.current_role() }})" readonly>
     </label>
     <label>Catatan (wajib)
       <textarea id="guard-note" rows="3" placeholder="mis. Sudah dicek KTP & STNK, kendaraan tamu keluarga."></textarea>
