@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 import hashlib
+import shutil
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -145,6 +146,19 @@ def _save(image: Any, relative: str) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(encode_image(image))
     return f"snapshots/{relative}"
+
+# Siklus hidup snapshot (M1): batasi jumlah folder sesi, buang yang tertua.
+MAX_SNAPSHOT_SESSIONS = 200
+
+def _prune_snapshots() -> None:
+    if not config.SNAPSHOT_DIR.is_dir():
+        return
+    sessions = [p for p in config.SNAPSHOT_DIR.iterdir() if p.is_dir()]
+    if len(sessions) <= MAX_SNAPSHOT_SESSIONS:
+        return
+    sessions.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    for stale in sessions[MAX_SNAPSHOT_SESSIONS:]:
+        shutil.rmtree(stale, ignore_errors=True)
 
 
 # --- Pemrosesan satu frame ----------------------------------------------------
@@ -389,6 +403,7 @@ def evaluate(
             snapshot_url=snapshot_url,
             reason=reason,
         )
+        _prune_snapshots()
 
     return EvaluationResult(
         session_id=session_id,

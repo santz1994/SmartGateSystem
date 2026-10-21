@@ -374,6 +374,26 @@ def test_distractors() -> None:
         not any(sticker.decode_sticker(s)[0] for s in stickers if s.meta.get("decoder") == "color_patch"),
     )
 
+def test_snapshot_prune() -> None:
+    print("rotasi snapshot (M1)")
+    import tempfile
+    from pathlib import Path as _Path
+
+    from app import config as _config
+    from app import service
+
+    with tempfile.TemporaryDirectory() as tmp:
+        original = _config.SNAPSHOT_DIR
+        _config.SNAPSHOT_DIR = _Path(tmp)
+        try:
+            for i in range(service.MAX_SNAPSHOT_SESSIONS + 5):
+                (_Path(tmp) / f"sesi{i:03d}").mkdir()
+            service._prune_snapshots()
+            sisa = len(list(_Path(tmp).iterdir()))
+            check("snapshot dibatasi ke MAX_SNAPSHOT_SESSIONS", sisa == service.MAX_SNAPSHOT_SESSIONS, f"(dapat {sisa})")
+        finally:
+            _config.SNAPSHOT_DIR = original
+
 def test_model_variant() -> None:
     print("pemilihan model YOLO")
     from app import detect_yolo
@@ -429,6 +449,7 @@ def main() -> int:
         test_date_sticker_row,
         test_monitor_moire,
         test_distractors,
+        test_snapshot_prune,
         test_decide,
         test_geometry,
         test_end_to_end,
