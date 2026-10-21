@@ -552,7 +552,7 @@ def read_plate_robust(
         return cached[1]
 
     best = ("", 0.0, "")
-    best_score = (-1, -1, -1.0)
+    best_score = (-1, -1, -1, -1.0)
 
     def attempt(variant: Any) -> bool:
         """Satu kali baca. True bila hasil sudah layak dan usaha boleh berhenti."""
@@ -562,10 +562,14 @@ def read_plate_robust(
         text, confidence, backend = read_plate(variant)
         valid = 1 if _looks_like_plate(text) else 0
         fits = 1 if number_fits_class(text, vehicle_class) else 0
-        score = (valid, fits, confidence)
+        # Panjang mendahului keyakinan: 'A8X' conf 1.0 tidak boleh mengalahkan
+        # 'L1399ABX' yang sama-sama berformat NRKB.
+        score = (valid, fits, min(len(text), 9), confidence)
         if score > best_score:
             best_score, best = score, (text, confidence, backend)
-        return bool(valid and confidence >= 0.80)
+        # Berhenti awal hanya untuk hasil yang terlihat utuh: potongan pendek
+        # seperti 'A8X'/'D226' sering hanya sebagian plat / sisa stiker.
+        return bool(valid and confidence >= 0.80 and len(text) >= 5)
 
     # Baris dibaca terpisah lebih dulu. Stiker tanggal/masa berlaku di bawah
     # baris plat punya kontras lebih tinggi dan selalu "menang" baca bila
@@ -581,9 +585,15 @@ def read_plate_robust(
         if attempt(base):
             break
     else:
-        # Belum terbaca -> naikkan kelas citra: zoom, deglare, binarisasi.
+        # Belum terbaca -> naikkan kelas citra: zoom polos dulu (terbukti
+        # memulihkan huruf kecil pada foto jarak jauh), lalu deglare/binarisasi.
         target = bases[0]
-        ladder = [
+        cv2 = _cv2()
+        scales = (2.0,) if fast else (2.0, 4.0)
+        ladder: list[Any] = [
+            cv2.resize(target, None, fx=s, fy=s, interpolation=cv2.INTER_CUBIC) for s in scales
+        ]
+        ladder += [
             pipeline.enhance_plate(target, 160),
             pipeline.enhance_plate(target, 240),
             pipeline.deglare(target),

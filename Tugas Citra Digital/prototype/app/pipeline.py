@@ -631,7 +631,7 @@ def plate_plausibility(crop: Any) -> tuple[str, str, int, float]:
     score = 0.6 * aspect_score + 0.4 * count_score
     return key, "vertical" if row_count >= 2 else "horizontal", glyphs, round(score, 4)
 
-def detect_plates(image: Any, max_candidates: int = 8) -> list[Detection]:
+def detect_plates(image: Any, max_candidates: int = 12) -> list[Detection]:
     """Cari kandidat plat.
 
     Backend dipilih otomatis: bila ``app.detect_yolo`` punya bobot YOLO yang
