@@ -38,7 +38,8 @@ Environment lain: `SGS_OCR_BACKEND`, `SGS_YOLO_WEIGHTS`, `SGS_DETECTION_ROI`,
 `SGS_CLAHE_CLIP_LIMIT`, `SGS_REQUIRE_SIGNED_STICKER` (default `1` = QR stiker
 wajib bertanda tangan `SGS1.*`). Kesehatan sistem: `GET /api/health` (butuh
 login). Deploy produksi: `python run.py --prod` (waitress) di belakang reverse
-proxy.
+proxy. Catatan: backend OCR (`SGS_OCR_BACKEND`) & varian YOLO dibaca saat
+aplikasi start — ganti env butuh restart.
 
 ## Model Detektor (3 varian, bisa dipilih saat runtime)
 
@@ -57,6 +58,12 @@ Ketiganya terpasang dan dapat ditukar langsung dari halaman **/training**
 `runs/detect/smartgate-colab-v6-<varian>/weights/best.pt` (dipilih otomatis;
 override via `SGS_YOLO_WEIGHTS` / `SGS_YOLO_VARIANT`). V4 parser menambah
 koreksi blok prefix (`00/O0` → `DD`, kode wilayah valid di `VALID_PREFIXES`).
+
+Catatan ukuran repo (M7): bobot `*.pt`/`*.onnx` kini dilacak **Git LFS**
+(`.gitattributes`). Bobot lama pada riwayat commit tetap blob biasa — migrasi
+riwayat (`git lfs migrate`) bersifat opsional dan butuh koordinasi (force push).
+Untuk ke depan: terbitkan bobot lewat **GitHub Releases**, lalu isi dengan
+`python tools/fetch_weights.py`.
 
 ## Training
 
