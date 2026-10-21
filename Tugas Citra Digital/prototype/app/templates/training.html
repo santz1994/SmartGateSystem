@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Training YOLO — Smart Gate{% endblock %}
+{% block head %}<meta http-equiv="refresh" content="15">{% endblock %}
 
 {% block content %}
-<meta http-equiv="refresh" content="15">
 
 <section class="card">
   <h2>Proses Training YOLOv8 — <code>{{ status.run_name }}</code></h2>
@@ -16,17 +16,17 @@
     <tr><td>Bobot <code>best.pt</code></td>
         <td>{% if status.weights_ready %}<span class="badge GREEN">siap ({{ status.weights_size_mb }} MB)</span>{% else %}<span class="badge AMBER">belum ada</span>{% endif %}</td></tr>
     {% if status.latest %}
-    <tr><td>mAP50 terakhir</td><td><strong>{{ '%.3f'|format(status.latest['metrics/mAP50(B)']|float) }}</strong></td></tr>
+    <tr><td>mAP50 terakhir</td><td><strong>{{ '%.3f'|format(status.latest['metrics/mAP50(B)']|default(0, true)|float) }}</strong></td></tr>
     <tr><td>Precision / Recall</td>
-        <td>{{ '%.2f'|format(status.latest['metrics/precision(B)']|float) }} / {{ '%.2f'|format(status.latest['metrics/recall(B)']|float) }}</td></tr>
+        <td>{{ '%.2f'|format(status.latest['metrics/precision(B)']|default(0, true)|float) }} / {{ '%.2f'|format(status.latest['metrics/recall(B)']|default(0, true)|float) }}</td></tr>
     {% endif %}
     {% if status.summary %}
     <tr><td>Test mAP50 / mAP50-95</td>
-        <td><strong>{{ '%.2f'|format(status.summary.test.mAP50 * 100) }}%</strong> / {{ '%.2f'|format(status.summary.test.mAP50_95 * 100) }}%</td></tr>
+        <td><strong>{{ '%.2f'|format(status.summary.test.mAP50|default(0, true)|float * 100) }}%</strong> / {{ '%.2f'|format(status.summary.test.mAP50_95|default(0, true)|float * 100) }}%</td></tr>
     <tr><td>Valid format OCR</td>
-        <td>{{ '%.2f'|format(status.summary.ocr_and_gate_benchmark.valid_format_rate * 100) }}% ({{ status.summary.ocr_and_gate_benchmark.valid_indonesian_format_count }}/{{ status.summary.ocr_and_gate_benchmark.total_detected_plates }} plat)</td></tr>
+        <td>{{ '%.2f'|format(status.summary.ocr_and_gate_benchmark.valid_format_rate|default(0, true)|float * 100) }}% ({{ status.summary.ocr_and_gate_benchmark.valid_indonesian_format_count|default(0) }}/{{ status.summary.ocr_and_gate_benchmark.total_detected_plates|default(0) }} plat)</td></tr>
     <tr><td>Latency rata-rata / P95</td>
-        <td>{{ status.summary.ocr_and_gate_benchmark.avg_end_to_end_latency_ms }} ms / {{ status.summary.ocr_and_gate_benchmark.p95_end_to_end_latency_ms }} ms</td></tr>
+        <td>{{ status.summary.ocr_and_gate_benchmark.avg_end_to_end_latency_ms|default(0) }} ms / {{ status.summary.ocr_and_gate_benchmark.p95_end_to_end_latency_ms|default(0) }} ms</td></tr>
     {% endif %}
   </table>
 </section>
@@ -39,7 +39,7 @@
   </p>
   <form id="model-form">
     {% for name, info in status.variants.items() %}
-    <label style="display:block;margin-bottom:.6em">
+    <label class="model-choice">
       <input type="radio" name="yolo_variant" value="{{ name }}"
              {% if name == status.active_variant %}checked{% endif %}
              {% if not info.ready %}disabled{% endif %}>
@@ -48,9 +48,9 @@
       {% else %}<span class="badge AMBER">bobot belum ada</span>{% endif %}
       {% if info.metrics %}
       <span class="muted small">
-        test mAP50 {{ '%.3f'|format(info.metrics.test_map50) }} ·
-        OCR valid {{ '%.1f'|format(info.metrics.valid_format_rate * 100) }}% ·
-        latency {{ info.metrics.latency_avg_ms }} ms (P95 {{ info.metrics.latency_p95_ms }} ms)
+        test mAP50 {{ '%.3f'|format(info.metrics.test_map50|default(0, true)|float) }} ·
+        OCR valid {{ '%.1f'|format(info.metrics.valid_format_rate|default(0, true)|float * 100) }}% ·
+        latency {{ info.metrics.latency_avg_ms|default(0) }} ms (P95 {{ info.metrics.latency_p95_ms|default(0) }} ms)
       </span>
       {% endif %}
     </label>
@@ -65,6 +65,7 @@
 
 <section class="card">
   <h3>Riwayat Epoch</h3>
+  <div class="table-scroll">
   <table class="data">
     <thead>
       <tr><th>Epoch</th><th>Waktu (s)</th><th>box_loss</th><th>cls_loss</th><th>Precision</th><th>Recall</th><th>mAP50</th><th>mAP50-95</th><th></th></tr>
@@ -73,20 +74,21 @@
       {% for e in status.epochs|reverse %}
       <tr>
         <td>{{ e.epoch }}</td>
-        <td class="muted small">{{ '%.0f'|format(e.time|float) }}</td>
-        <td>{{ '%.3f'|format(e['train/box_loss']|float) }}</td>
-        <td>{{ '%.3f'|format(e['train/cls_loss']|float) }}</td>
-        <td>{{ '%.2f'|format(e['metrics/precision(B)']|float) }}</td>
-        <td>{{ '%.2f'|format(e['metrics/recall(B)']|float) }}</td>
-        <td><strong>{{ '%.3f'|format(e['metrics/mAP50(B)']|float) }}</strong></td>
-        <td>{{ '%.3f'|format(e['metrics/mAP50-95(B)']|float) }}</td>
-        <td><div style="background:#2ea;border-radius:3px;height:10px;width:{{ (e['metrics/mAP50(B)']|float * 80)|round|int }}px"></div></td>
+        <td class="muted small">{{ '%.0f'|format(e.time|default(0, true)|float) }}</td>
+        <td>{{ '%.3f'|format(e['train/box_loss']|default(0, true)|float) }}</td>
+        <td>{{ '%.3f'|format(e['train/cls_loss']|default(0, true)|float) }}</td>
+        <td>{{ '%.2f'|format(e['metrics/precision(B)']|default(0, true)|float) }}</td>
+        <td>{{ '%.2f'|format(e['metrics/recall(B)']|default(0, true)|float) }}</td>
+        <td><strong>{{ '%.3f'|format(e['metrics/mAP50(B)']|default(0, true)|float) }}</strong></td>
+        <td>{{ '%.3f'|format(e['metrics/mAP50-95(B)']|default(0, true)|float) }}</td>
+        <td><div class="map-bar" style="width:{{ (e['metrics/mAP50(B)']|default(0, true)|float * 80)|round|int }}px"></div></td>
       </tr>
       {% else %}
       <tr><td colspan="9" class="muted">Training belum dimulai / results.csv belum ada.</td></tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </section>
 
 <section class="grid">

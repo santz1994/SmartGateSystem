@@ -44,6 +44,7 @@
 
   <div class="card">
     <h2>Daftar Kendaraan ({{ rows|length }})</h2>
+    <div class="table-scroll">
     <table class="data">
       <thead>
         <tr><th>#</th><th>Plat</th><th>Stiker</th><th>Pemilik</th><th>Jenis</th><th>Booking</th><th>Berlaku s.d.</th><th>Status</th><th></th></tr>
@@ -72,6 +73,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
     <p class="muted small">
       Kendaraan yang sudah tercatat di log tidak dapat dihapus permanen — sistem
       otomatis menonaktifkannya agar jejak audit (foto + keputusan) tetap utuh.

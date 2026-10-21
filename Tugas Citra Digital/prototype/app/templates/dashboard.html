@@ -5,7 +5,7 @@
 <section class="grid">
   <div class="card">
     <h2>Statistik Keputusan</h2>
-    <table class="kv">
+    <table class="kv" id="stats-table">
       <tr><td>Total log</td><td><strong>{{ stats.TOTAL }}</strong></td></tr>
       <tr><td>Buka pintu otomatis</td><td><strong class="ok">{{ stats.get('AUTO_OPEN', 0) }}</strong></td></tr>
       <tr><td>Tidak dikenali</td><td><strong class="bad">{{ stats.get('NO_MATCH', 0) + stats.get('OCR_FAILED', 0) }}</strong></td></tr>
@@ -61,11 +61,12 @@
 
 <section class="card">
   <h2>Log Terbaru</h2>
+  <div class="table-scroll">
   <table class="data">
     <thead>
       <tr><th>#</th><th>Waktu</th><th>Plat</th><th>Stiker</th><th>Skor</th><th>Keputusan</th><th>Foto</th><th></th></tr>
     </thead>
-    <tbody>
+    <tbody id="log-table-body">
       {% for log in logs %}
       <tr>
         <td>{{ log.id }}</td>
@@ -82,6 +83,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </section>
 {% endblock %}
 

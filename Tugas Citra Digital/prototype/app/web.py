@@ -135,7 +135,7 @@ def create_app() -> Flask:
 
     @app.context_processor
     def _inject_auth() -> dict[str, Any]:
-        return {"auth": auth, "csrf_token": _csrf_token()}
+        return {"auth": auth, "csrf_token": _csrf_token(), "app_version": config.APP_VERSION}
 
     # --- Halaman --------------------------------------------------------------
 

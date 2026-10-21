@@ -351,14 +351,39 @@ if (modelForm) {
 /* --- Polling alert dashboard --- */
 if (document.querySelector('meta[name="sgs-poll"]')) {
   let lastId = 0;
-  setInterval(async () => {
+  let timer = null;
+
+  // Patch parsial (M5): ganti panel yang berubah, bukan reload seluruh halaman.
+  const refreshPanels = async () => {
+    const res = await fetch('/');
+    const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+    for (const sel of ['#pending-list', '#stats-table', '#log-table-body']) {
+      const fresh = doc.querySelector(sel);
+      const current = document.querySelector(sel);
+      if (fresh && current) current.replaceChildren(...fresh.childNodes);
+    }
+  };
+
+  const poll = async () => {
     try {
       const res = await fetch('/api/alerts');
       const data = await res.json();
-      if (lastId && data.latest_id > lastId) window.location.reload();
+      if (lastId && data.latest_id > lastId) await refreshPanels();
       lastId = data.latest_id;
     } catch {
       /* dashboard tetap jalan walau polling gagal */
     }
-  }, 3000);
+  };
+
+  const start = () => {
+    if (!timer) timer = setInterval(poll, 3000);
+    poll();
+  };
+  const stop = () => {
+    clearInterval(timer);
+    timer = null;
+  };
+  // Tab di background tidak perlu dipolling (hemat API + CPU).
+  document.addEventListener('visibilitychange', () => (document.hidden ? stop() : start()));
+  start();
 }

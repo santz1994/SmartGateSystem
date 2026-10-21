@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+# Versi statis untuk cache-busting app.js/style.css (L5).
+APP_VERSION = "2026.10.21"
 DATA_DIR = Path(os.getenv("SGS_DATA_DIR", BASE_DIR / "data"))
 SNAPSHOT_DIR = DATA_DIR / "snapshots"
 DIAGNOSTIC_DIR = DATA_DIR / "diag" / "ocr_failed"
