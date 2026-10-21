@@ -60,9 +60,8 @@
           <td><span class="badge {{ 'GREEN' if row.is_active else 'RED' }}">{{ 'Aktif' if row.is_active else 'Nonaktif' }}</span></td>
           <td>
             <a class="btn small" href="{{ url_for('vehicles_page', edit=row.id) }}">Ubah</a>
-            <form method="post" action="{{ url_for('vehicles_delete', vehicle_id=row.id) }}" style="display:inline"
-                  onsubmit="return confirm('Hapus kendaraan {{ row.plate_number }}?')">
-              <button class="small" type="submit">Hapus</button>
+            <form method="post" action="{{ url_for('vehicles_delete', vehicle_id=row.id) }}" style="display:inline">
+              <button class="small" type="submit" data-confirm="Hapus kendaraan {{ row.plate_number|e }}?">Hapus</button>
             </form>
           </td>
         </tr>
