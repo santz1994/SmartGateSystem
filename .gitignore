@@ -30,6 +30,5 @@ Thumbs.db
 
 # Zip & artefak training (bobot/unduhan, terlalu besar)
 *.zip
-smartgate-artifacts*/
 dataset_merged_colab.zip
 smartgate-colab-2-results.zip
