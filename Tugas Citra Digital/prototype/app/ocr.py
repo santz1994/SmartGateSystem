@@ -272,7 +272,7 @@ def _read_template(crop: Any) -> tuple[str, float]:
         scores.append(score)
         margins.append(margin)
 
-    text = normalize_plate("".join(chars))
+    text = best_plate_text(["".join(chars)])
     # Margin rendah = karakter ambigu (8 vs B). Turunkan keyakinan, jangan buang.
     confidence = float(np.mean(scores)) * min(1.0, 0.6 + 4.0 * float(np.mean(margins)))
     return text, round(min(confidence, 0.99), 4)
@@ -300,7 +300,7 @@ def _read_template_multiline(crop: Any) -> tuple[str, float]:
     # Baris yang gagal dibaca menurunkan keyakinan keseluruhan (bukan diabaikan).
     coverage = len(parts) / len(rows)
     confidence = float(np.mean(confidences)) * (0.6 + 0.4 * coverage)
-    return normalize_plate("".join(parts)), round(min(confidence, 0.99), 4)
+    return best_plate_text(parts), round(min(confidence, 0.99), 4)
 
 
 # --- Backend: PaddleOCR -------------------------------------------------------
@@ -520,15 +520,21 @@ def _plate_candidates(texts: list[str]) -> list[str]:
 def best_plate_text(texts: list[str]) -> str:
     """Pilih kandidat paling menyerupai NRKB — bukan teks terpanjang/tergabung.
 
-    Skor = (berformat NRKB, diawali huruf, panjang). Faktor kedua menjaga
-    sisa stiker tanggal ("05.22" -> "D522") tidak mengalahkan bacaan plat
-    asli yang diawali huruf.
+    Aturan keras (permintaan pengguna): plat nomor SELALU diawali huruf.
+    Kandidat yang bentuk mentahnya diawali angka — sisa stiker tanggal
+    ('04 25' -> 'D425'), fragmen nomor — ditolak, jangan diubah jadi plat
+    palsu oleh koreksi prefix. Tidak ada kandidat berawal huruf = tidak terbaca.
+
+    Skor = (berformat NRKB, panjang): 'H2518OK' menang atas '2518OK', 'OK',
+    maupun gabungan penuh 'H2518OK1226' yang menyertakan stiker tanggal.
     """
-    best_text, best_score = "", (-1, -1, -1)
+    best_text, best_score = "", (-1, -1)
     for candidate in _plate_candidates(texts):
+        if not candidate[:1].isalpha():
+            continue
         normalized = normalize_plate(candidate)
         valid = 1 if _looks_like_plate(normalized) else 0
-        score = (valid, 1 if candidate[:1].isalpha() else 0, len(normalized) if valid else 0)
+        score = (valid, len(normalized) if valid else 0)
         if score > best_score:
             best_score, best_text = score, normalized
     return best_text

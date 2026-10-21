@@ -227,6 +227,9 @@ def _process_frame(
                 for r in readings
                 if r[0] is det
             ):
+                # 1) tumbuhkan crop ke baris tinta plat utuh (kotak sering hanya
+                #    menutup sebagian plat), 2) zoom-out + pita beririsan.
+                readings.append((det, *ocr.read_plate(pipeline.grow_to_text_line(image, det.bbox))))
                 x1, y1, x2, y2 = (int(v) for v in det.bbox)
                 pad_x, pad_y = int((x2 - x1) * 0.25), max(int((y2 - y1) * 0.6), 20)
                 wide = image[

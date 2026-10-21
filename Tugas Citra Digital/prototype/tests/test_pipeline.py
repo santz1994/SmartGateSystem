@@ -256,9 +256,15 @@ def test_detection_roi() -> None:
     print("detection ROI dan exposure")
     np = pipeline._np()
     image = np.zeros((100, 200, 3), dtype=np.uint8)
-    roi, offset = pipeline.detection_roi(image)
+    roi, offset = pipeline.detection_roi(image, (0.05, 0.35, 0.95, 1.0))
     check("ROI memotong bagian atas frame", roi.shape[:2] == (65, 180), f"(dapat {roi.shape})")
     check("offset kembali ke frame asli", offset == (10, 35), f"(dapat {offset})")
+    full, no_offset = pipeline.detection_roi(image)
+    check("tanpa ROI: frame diproses utuh", full is image and no_offset == (0, 0))
+    check(
+        "foto persegi/portrait bebas ROI (plat bisa di mana saja)",
+        640 / 640 < 1.3,
+    )
     corrected = pipeline.detection_preprocess(np.full((8, 8, 3), 255, dtype=np.uint8), gamma=1.2)
     check("preprocess exposure menghasilkan citra", corrected.shape == (8, 8, 3))
 
@@ -283,6 +289,11 @@ def test_plate_text_quality_gate() -> None:
         "Q di blok huruf = O (H 2518 QK -> H2518OK)",
         ocr.best_plate_text(["H", "2518", "QK", "12 26"]) == "H2518OK",
         f"(dapat {ocr.best_plate_text(['H', '2518', 'QK', '12 26'])!r})",
+    )
+    check(
+        "aturan keras: plat diawali huruf — kandidat berawal angka ditolak",
+        ocr.best_plate_text(["04 25"]) == "" and ocr.best_plate_text(["0425", "1226"]) == "",
+        f"(dapat {ocr.best_plate_text(['04 25'])!r} / {ocr.best_plate_text(['0425', '1226'])!r})",
     )
     winner, _ = fusion.vote_plate([("O02760XCL1029", 0.9), ("B 1234 X6", 0.8)])
     check("voting membuang teks melanggar aturan", winner == "B1234XG", f"(dapat {winner!r})")

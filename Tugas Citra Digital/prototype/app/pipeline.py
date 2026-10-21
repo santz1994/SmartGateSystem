@@ -58,11 +58,18 @@ def detection_preprocess(image: Any, gamma: float | None = None) -> Any:
     return cv2.cvtColor(cv2.merge([clahe.apply(l_ch), a_ch, b_ch]), cv2.COLOR_LAB2BGR)
 
 
-def detection_roi(image: Any) -> tuple[Any, tuple[int, int]]:
-    """Ambil ROI bawah frame dan kembalikan offset koordinat frame asli."""
+def detection_roi(image: Any, roi: tuple[float, float, float, float] | None = None) -> tuple[Any, tuple[int, int]]:
+    """Ambil ROI bawah frame dan kembalikan offset koordinat frame asli.
+
+    ``roi=None`` = seluruh frame diproses. ROI gerbang (buang atas frame agar
+    jaket/wajah tidak jadi kandidat) hanya berlaku untuk frame kamera lebar;
+    foto close-up/portret bisa memuat plat di mana saja dan justru terpotong.
+    """
     np = _np()
+    if roi is None:
+        return image, (0, 0)
     h, w = image.shape[:2]
-    x1, y1, x2, y2 = config.DETECTION_ROI
+    x1, y1, x2, y2 = roi
     x1i, y1i = max(0, int(x1 * w)), max(0, int(y1 * h))
     x2i, y2i = min(w, int(x2 * w)), min(h, int(y2 * h))
     if x2i <= x1i or y2i <= y1i:
@@ -224,6 +231,39 @@ def enhance_plate(
 
     blur = cv2.GaussianBlur(enhanced, (0, 0), 3.0)
     return cv2.addWeighted(enhanced, 1.6, blur, -0.6, 0)
+
+def grow_to_text_line(image: Any, bbox: tuple[int, int, int, int]) -> Any:
+    """Lebarkan kotak kandidat ke seluruh baris tinta plat pada frame.
+
+    Detektor sering hanya menutup sebagian plat ('NB' saja) sehingga OCR membaca
+    potongan. Tumbuh dulu vertikal ke pita tinta, lalu horizontal ke seluruh
+    baris — baris 'H 6249 NB' utuh kembali terbaca. Batas jangkauan 1x tinggi /
+    1,5x lebar kotak agar tidak menelan seluruh frame.
+    """
+    cv2, np = _cv2(), _np()
+    h_frame, w_frame = image.shape[:2]
+    x1, y1, x2, y2 = (int(v) for v in bbox)
+    x1, y1 = max(x1, 0), max(y1, 0)
+    x2, y2 = min(x2, w_frame), min(y2, h_frame)
+    if x2 <= x1 or y2 <= y1:
+        return image[y1:y2, x1:x2].copy()
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    def grow(profile: Any, lo: int, hi: int, reach: int, gap: int) -> tuple[int, int]:
+        closed = np.convolve((profile > 0).astype(np.uint8), np.ones(max(gap, 2), np.uint8), mode="same") > 0
+        window_lo, window_hi = max(lo - reach, 0), min(hi + reach, len(profile))
+        idx = np.nonzero(closed[window_lo:window_hi])[0]
+        if idx.size == 0:
+            return lo, hi
+        return window_lo + int(idx.min()), window_lo + int(idx.max()) + 1
+
+    row_ink = (binary[:, x1:x2] > 0).sum(axis=1)
+    y1, y2 = grow(row_ink, y1, y2, max(y2 - y1, 4), max(int((y2 - y1) * 0.3), 4))
+    col_ink = (binary[y1:y2, :] > 0).sum(axis=0)
+    x1, x2 = grow(col_ink, x1, x2, int((x2 - x1) * 1.5), max(y2 - y1, 8))
+    return image[y1:y2, x1:x2].copy()
 
 def filter_gate_zone(
     detections: list[Detection],
@@ -641,7 +681,11 @@ def detect_plates(image: Any, max_candidates: int = 12) -> list[Detection]:
     from . import detect_yolo
     # Crop ROI dulu, baru gamma+CLAHE — pemrosesan citra berat hanya pada kotak
     # kecil plat, bukan seluruh frame CCTV (kunci latensi rendah di CPU standar).
-    roi_image, offset = detection_roi(image)
+    # ROI gerbang hanya untuk frame kamera lebar (rasio >= 1.3). Foto manual /
+    # close-up (square/portrait) diproses utuh — ROI justru memotong platnya.
+    h_frame, w_frame = image.shape[:2]
+    gate_roi = config.DETECTION_ROI if w_frame / max(h_frame, 1) >= 1.3 else None
+    roi_image, offset = detection_roi(image, gate_roi)
     detector_image = detection_preprocess(roi_image)
 
     if detect_yolo.available():
