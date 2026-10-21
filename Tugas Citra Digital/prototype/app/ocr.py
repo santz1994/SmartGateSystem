@@ -15,7 +15,9 @@ butuh ~40 ms, tidak perlu diulang tiap request.
 from __future__ import annotations
 
 import re
+import hashlib
 import logging
+import time
 from functools import lru_cache
 from typing import Any
 
@@ -471,7 +473,11 @@ def _enhance_ocr_crop(crop: Any) -> Any:
     )
     return cv2.cvtColor(adaptive, cv2.COLOR_GRAY2BGR)
 
-_ROBUST_CACHE: dict[tuple[str, str, bytes], tuple[str, float, str]] = {}
+# Kunci cache = digest SHA-1 crop (bukan bytes mentah yang mahal di-hash berulang
+# dan boros memori), dengan TTL agar frame kamera yang lambat berubah tidak
+# mengunci hasil lama selamanya (L6).
+_ROBUST_CACHE: dict[tuple[str, str, bytes], tuple[float, tuple[str, float, str]]] = {}
+_CACHE_TTL_SECONDS = 30.0
 
 def _looks_like_plate(text: str) -> bool:
     compact = re.sub(r"[^A-Z0-9]", "", (text or "").upper())
@@ -539,10 +545,11 @@ def read_plate_robust(
     """
     from . import pipeline
 
-    cache_key = (vehicle_class or "", "fast" if fast else "full", crop.tobytes())
+    digest = hashlib.sha1(crop.tobytes()).digest()
+    cache_key = (vehicle_class or "", "fast" if fast else "full", digest)
     cached = _ROBUST_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
+    if cached is not None and time.monotonic() - cached[0] < _CACHE_TTL_SECONDS:
+        return cached[1]
 
     best = ("", 0.0, "")
     best_score = (-1, -1, -1.0)
@@ -590,7 +597,7 @@ def read_plate_robust(
 
     if len(_ROBUST_CACHE) >= 32:
         _ROBUST_CACHE.pop(next(iter(_ROBUST_CACHE)))
-    _ROBUST_CACHE[cache_key] = best
+    _ROBUST_CACHE[cache_key] = (time.monotonic(), best)
     return best
 
 @lru_cache(maxsize=1)
