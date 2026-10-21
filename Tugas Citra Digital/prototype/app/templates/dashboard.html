@@ -85,8 +85,4 @@
 </section>
 {% endblock %}
 
-{% block scripts %}
-<script>
-  window.SGS = { pollAlerts: true };
-</script>
-{% endblock %}
+{% block head %}<meta name="sgs-poll" content="1">{% endblock %}

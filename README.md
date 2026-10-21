@@ -37,7 +37,8 @@ dibuat otomatis.
 Environment lain: `SGS_OCR_BACKEND`, `SGS_YOLO_WEIGHTS`, `SGS_DETECTION_ROI`,
 `SGS_CLAHE_CLIP_LIMIT`, `SGS_REQUIRE_SIGNED_STICKER` (default `1` = QR stiker
 wajib bertanda tangan `SGS1.*`). Kesehatan sistem: `GET /api/health` (butuh
-login). Deploy produksi: `waitress-serve --host 127.0.0.1 --port 5000 run:app`.
+login). Deploy produksi: `python run.py --prod` (waitress) di belakang reverse
+proxy.
 
 ## Model Detektor (3 varian, bisa dipilih saat runtime)
 

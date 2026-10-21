@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import sqlite3
 import hashlib
+import os
 import shutil
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -149,6 +151,10 @@ def _save(image: Any, relative: str) -> str:
 
 # Siklus hidup snapshot (M1): batasi jumlah folder sesi, buang yang tertua.
 MAX_SNAPSHOT_SESSIONS = 200
+
+# Batas inferensi konkuren (M2): beberapa request YOLO+OCR paralel cukup untuk
+# membuat CPU jenuh. Slot global, lintas request.
+_INFERENCE_SLOTS = threading.Semaphore(int(os.getenv("SGS_MAX_CONCURRENT_INFER", "2")))
 
 def _prune_snapshots() -> None:
     if not config.SNAPSHOT_DIR.is_dir():
@@ -301,18 +307,19 @@ def evaluate(
     session_id = session_id or uuid.uuid4().hex[:12]
     thresholds = db.settings()
 
-    frames = [
-        _process_frame(
-            label,
-            image,
-            role,
-            session_id,
-            plate_enabled=plate_enabled,
-            sticker_enabled=sticker_enabled,
-            fast=fast,
-        )
-        for label, image, role in images
-    ]
+    with _INFERENCE_SLOTS:
+        frames = [
+            _process_frame(
+                label,
+                image,
+                role,
+                session_id,
+                plate_enabled=plate_enabled,
+                sticker_enabled=sticker_enabled,
+                fast=fast,
+            )
+            for label, image, role in images
+        ]
     if not frames:
         raise ValueError("Tidak ada citra untuk diproses")
     _mark_best_frames(frames)

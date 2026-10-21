@@ -332,8 +332,24 @@ if (camVideo) {
   }
 }
 
+/* --- Ganti model deteksi aktif (halaman /training) --- */
+const modelForm = $('#model-form');
+if (modelForm) {
+  modelForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const picked = document.querySelector('input[name="yolo_variant"]:checked');
+    if (!picked) return;
+    const { ok, data } = await postJSON('/api/settings', { yolo_variant: picked.value });
+    if (ok) {
+      location.reload();
+    } else {
+      alert(data.error || 'Gagal mengganti model');
+    }
+  });
+}
+
 /* --- Polling alert dashboard --- */
-if (window.SGS && window.SGS.pollAlerts) {
+if (document.querySelector('meta[name="sgs-poll"]')) {
   let lastId = 0;
   setInterval(async () => {
     try {

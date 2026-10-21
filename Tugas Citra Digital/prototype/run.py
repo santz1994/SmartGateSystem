@@ -21,6 +21,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=int(os.getenv("SGS_PORT", "5000")))
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--reset-db", action="store_true", help="Hapus dan seed ulang database")
+    parser.add_argument("--prod", action="store_true", help="Sajikan lewat waitress (server produksi)")
     args = parser.parse_args()
 
     from app import db
@@ -32,6 +33,12 @@ def main() -> None:
     from app.web import create_app
 
     app = create_app()
+    if args.prod:
+        from waitress import serve
+
+        print(f"Smart Gate prototype (waitress) -> http://{args.host}:{args.port}")
+        serve(app, host=args.host, port=args.port, threads=int(os.getenv("SGS_WEB_THREADS", "8")))
+        return
     print(f"Smart Gate prototype -> http://{args.host}:{args.port}")
     app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
 

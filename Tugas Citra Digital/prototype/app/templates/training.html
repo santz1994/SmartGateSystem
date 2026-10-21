@@ -98,22 +98,4 @@
   {% endfor %}
 </section>
 
-<script>
-  document.getElementById('model-form').addEventListener('submit', async (ev) => {
-    ev.preventDefault();
-    const picked = document.querySelector('input[name="yolo_variant"]:checked');
-    if (!picked) return;
-    const res = await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ yolo_variant: picked.value }),
-    });
-    if (res.ok) {
-      location.reload();
-    } else {
-      const data = await res.json().catch(() => ({}));
-      alert(data.error || 'Gagal mengganti model');
-    }
-  });
-</script>
 {% endblock %}

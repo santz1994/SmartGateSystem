@@ -111,6 +111,17 @@ def create_app() -> Flask:
         auth.logout()
         return redirect(url_for("login_page"))
 
+    @app.after_request
+    def security_headers(resp: Any) -> Any:
+        """Header keamanan (M3) — CSP juga menahan XSS yang lolos escape."""
+        resp.headers["Content-Security-Policy"] = (
+            "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+        )
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        resp.headers["X-Frame-Options"] = "DENY"
+        resp.headers["Referrer-Policy"] = "same-origin"
+        return resp
+
     @app.before_request
     def csrf_protect() -> Any:
         """Tolak POST/PUT/DELETE tanpa token sesi (H5). Anonymous tetap ditolak
@@ -254,6 +265,8 @@ def create_app() -> Flask:
         files = [f for f in request.files.getlist("images") if f and f.filename]
         if not files:
             return jsonify({"error": "Tidak ada berkas yang diunggah"}), 400
+        if len(files) > 6:
+            return jsonify({"error": "Maksimal 6 berkas per permintaan"}), 400
 
         images: list[tuple[str, Any, str | None]] = []
         for index, storage in enumerate(files, start=1):
