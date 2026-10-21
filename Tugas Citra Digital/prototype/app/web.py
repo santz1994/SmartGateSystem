@@ -12,7 +12,17 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, url_for
+from flask import (
+    Flask,
+    abort,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    session,
+    url_for,
+)
 
 from . import auth, config, db, detect_yolo, fusion, ocr, pipeline, service, simulate, sticker, vehicles
 
@@ -42,6 +52,11 @@ TRAIN_PLOTS = (
     "confusion_matrix.png",
 )
 
+
+def _csrf_token() -> str:
+    if "csrf" not in session:
+        session["csrf"] = secrets.token_hex(16)
+    return session["csrf"]
 
 def _secret_key() -> str:
     """Kunci sesi: ``SGS_SECRET_KEY`` (produksi) atau file acak persisten (demo)."""
@@ -96,9 +111,20 @@ def create_app() -> Flask:
         auth.logout()
         return redirect(url_for("login_page"))
 
+    @app.before_request
+    def csrf_protect() -> Any:
+        """Tolak POST/PUT/DELETE tanpa token sesi (H5). Anonymous tetap ditolak
+        401 oleh login_required — jangan tukar pesan errornya."""
+        if request.method not in ("POST", "PUT", "DELETE") or auth.current_user() is None:
+            return None
+        token = request.form.get("csrf") or request.headers.get("X-CSRF-Token") or ""
+        if not secrets.compare_digest(token, session.get("csrf", "")):
+            abort(403, "CSRF token invalid")
+        return None
+
     @app.context_processor
     def _inject_auth() -> dict[str, Any]:
-        return {"auth": auth}
+        return {"auth": auth, "csrf_token": _csrf_token()}
 
     # --- Halaman --------------------------------------------------------------
 

@@ -7,6 +7,9 @@ const $ = (sel) => document.querySelector(sel);
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// Token CSRF per sesi (H5) — dikirim sebagai header pada semua POST fetch.
+const csrfToken = () => document.querySelector('meta[name="csrf"]')?.content || '';
+
 function badge(alert) {
   return `<span class="badge ${esc(alert)}">${esc(alert)}</span>`;
 }
@@ -68,7 +71,7 @@ function renderResult(data) {
 async function postJSON(url, body) {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken() },
     body: JSON.stringify(body),
   });
   return { ok: res.ok, data: await res.json() };
@@ -111,7 +114,11 @@ if (uploadForm) {
     for (const file of files) form.append('images', file);
 
     try {
-      const res = await fetch('/api/evaluate', { method: 'POST', body: form });
+      const res = await fetch('/api/evaluate', {
+        method: 'POST',
+        body: form,
+        headers: { 'X-CSRF-Token': csrfToken() },
+      });
       const data = await res.json();
       box.innerHTML = res.ok ? renderResult(data) : `<p class="bad">${esc(data.error)}</p>`;
     } catch (err) {
@@ -239,7 +246,11 @@ if (camVideo) {
         sticker: persist && stickerEnabled ? '1' : '0',
         fast: persist ? '0' : '1',
       });
-      const res = await fetch(`/api/evaluate?${params.toString()}`, { method: 'POST', body: form });
+      const res = await fetch(`/api/evaluate?${params.toString()}`, {
+        method: 'POST',
+        body: form,
+        headers: { 'X-CSRF-Token': csrfToken() },
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Gagal memindai');
       resultBox.innerHTML = renderResult(data);

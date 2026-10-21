@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Login — Smart Gate</title>
+  <meta name="csrf" content="{{ csrf_token }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -19,6 +20,7 @@
       <h2>Login Operator</h2>
       {% if error %}<p class="muted" style="color:#ff6b6b;">{{ error }}</p>{% endif %}
       <form method="post" action="{{ url_for('login_submit', next=request.args.get('next', '')) }}">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}">
         <label>Username
           <input name="username" autocomplete="username" required>
         </label>

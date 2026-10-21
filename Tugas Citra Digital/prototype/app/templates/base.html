@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Smart Gate Prototype{% endblock %}</title>
+  <meta name="csrf" content="{{ csrf_token }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -26,6 +27,7 @@
     <div class="muted">
       {{ auth.current_user() }} ({{ auth.current_role() }})
       <form method="post" action="{{ url_for('logout') }}" style="display:inline">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}">
         <button class="small" type="submit">Keluar</button>
       </form>
     </div>
