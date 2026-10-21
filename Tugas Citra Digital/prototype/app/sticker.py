@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import time
 from functools import lru_cache
 from typing import Any
@@ -19,6 +20,11 @@ from typing import Any
 from .pipeline import Detection, _cv2, _np
 
 TOKEN_PREFIX = "SGS1"
+CODE_PATTERN = re.compile(r"^STK-[A-Z0-9-]{3,32}$")
+
+def _require_signed() -> bool:
+    """Produksi: QR tanpa tanda tangan ditolak. Escape hatch demo: env = 0."""
+    return os.getenv("SGS_REQUIRE_SIGNED_STICKER", "1") == "1"
 
 
 def _secret() -> bytes | None:
@@ -80,6 +86,19 @@ def _apriltag_detector():
     return cv2.aruco.ArucoDetector(dictionary, params)
 
 
+def _legacy_code(payload: str, confidence: float, decoder: str) -> tuple[str | None, float, str]:
+    """QR lama tanpa tanda tangan: hanya kode berformat STK-* yang boleh lolos.
+
+    Default menolak semuanya (H2) — QR bebas apa pun (teks HTML/JS, kode
+    kendaraan orang lain) tidak boleh menjadi bukti identitas.
+    """
+    if _require_signed():
+        return None, 0.0, "qrcode_unsigned_rejected"
+    compact = re.sub(r"\s+", "", (payload or "").upper())
+    if not CODE_PATTERN.fullmatch(compact):
+        return None, 0.0, "qrcode_bad_format"
+    return compact, confidence, decoder
+
 def decode_sticker(detection: Detection) -> tuple[str | None, float, str]:
     """Kembalikan (kode, keyakinan, decoder) untuk satu kandidat stiker."""
     if detection.payload:
@@ -88,7 +107,9 @@ def decode_sticker(detection: Detection) -> tuple[str | None, float, str]:
             return str(payload["c"]), detection.confidence, "qrcode_signed"
         if detection.payload.startswith(f"{TOKEN_PREFIX}."):
             return None, 0.0, "qrcode_invalid_signature"
-        return detection.payload, detection.confidence, detection.meta.get("decoder", "qrcode_legacy")
+        return _legacy_code(
+            detection.payload, detection.confidence, detection.meta.get("decoder", "qrcode_legacy")
+        )
 
     crop = detection.crop
     if crop is None or crop.size == 0:
@@ -105,7 +126,7 @@ def decode_sticker(detection: Detection) -> tuple[str | None, float, str]:
             return str(payload["c"]), confidence, "qrcode_signed"
         if code.startswith(f"{TOKEN_PREFIX}."):
             return None, 0.0, "qrcode_invalid_signature"
-        return code, confidence, "qrcode_legacy"
+        return _legacy_code(code, confidence, "qrcode_legacy")
 
     # Pola warna: tidak menghasilkan kode, hanya sinyal "ada stiker".
     return None, detection.confidence, detection.meta.get("decoder", "color_patch")

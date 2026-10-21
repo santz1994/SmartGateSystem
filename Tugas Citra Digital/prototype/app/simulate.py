@@ -290,6 +290,14 @@ def render_scene(
         rows=rows if vehicle != "truck" else max(rows, 2),
         aspect=profile.ideals[0],
     )
+    # QR demo ikut rantai kepercayaan: tanda tangani bila kunci tersedia (H2).
+    if sticker_payload and not sticker_payload.startswith("SGS1."):
+        try:
+            from .sticker import create_signed_token
+
+            sticker_payload = create_signed_token(1, sticker_payload)
+        except RuntimeError:
+            pass  # tanpa kunci: QR mentah tetap dirender, decoder menolaknya
     sticker = render_sticker(sticker_payload) if sticker_payload else None
     _DRAWERS.get(vehicle, _draw_car)(canvas, plate, sticker, scale)
 

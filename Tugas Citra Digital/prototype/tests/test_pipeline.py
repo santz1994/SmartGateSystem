@@ -298,6 +298,19 @@ def test_signed_sticker_token() -> None:
     payload = sticker.verify_signed_token(token)
     check("token valid", payload is not None and payload["c"] == "STK-TEST-001")
     check("token yang diubah ditolak", sticker.verify_signed_token(token + "x") is None)
+
+    def det(value: str) -> pipeline.Detection:
+        return pipeline.Detection(
+            kind="sticker", quad=[[0, 0], [1, 0], [1, 1], [0, 1]], confidence=0.9, payload=value
+        )
+
+    check("QR tanpa tanda tangan ditolak", sticker.decode_sticker(det("HELLO"))[0] is None)
+    check("QR STK-* legacy ditolak saat REQUIRE_SIGNED=1", sticker.decode_sticker(det("STK-WRG-0042"))[0] is None)
+    check("QR berisi HTML ditolak", sticker.decode_sticker(det("<img src=x onerror=alert(1)>"))[0] is None)
+    os.environ["SGS_REQUIRE_SIGNED_STICKER"] = "0"
+    check("escape hatch demo: STK-* legacy diterima", sticker.decode_sticker(det("STK-WRG-0042"))[0] == "STK-WRG-0042")
+    check("format liar tetap ditolak walau escape hatch", sticker.decode_sticker(det("HELLO"))[0] is None)
+    os.environ.pop("SGS_REQUIRE_SIGNED_STICKER", None)
     if previous is None:
         os.environ.pop("SGS_STICKER_SIGNING_KEY", None)
     else:
