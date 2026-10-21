@@ -165,7 +165,7 @@ def _process_frame(
 
     # Multi-kendaraan: buang plat di luar zona gerbang / terlalu kecil, lalu buang
     # blob yang menelan kandidat lain — semua secara geometris, SEBELUM OCR.
-    # Sisanya cukup 2 kandidat paling dekat: OCR itu mahal (~0,5 s per bacaan).
+    # Sisanya cukup 3 kandidat teratas: OCR itu mahal (~0,5 s per bacaan).
     plates: list[pipeline.Detection] = []
     if plate_enabled:
         plates = pipeline.filter_gate_zone(pipeline.detect_plates(image), image.shape)
@@ -173,7 +173,7 @@ def _process_frame(
         # Kualitas kandidat (bingkai + struktur plat) didahulukan, kedekatan
         # gerbang pemecah seri — blob teks/video besar tidak boleh mengambil
         # slot OCR dari plat asli.
-        plates = sorted(plates, key=lambda d: pipeline.candidate_score(d, image.shape), reverse=True)[: (1 if fast else 2)]
+        plates = sorted(plates, key=lambda d: pipeline.candidate_score(d, image.shape), reverse=True)[: (1 if fast else 3)]
     stickers = pipeline.detect_stickers(image) if sticker_enabled and not fast else []
     # Blok warna jenuh di latar (video/layar) bukan stiker: buang yang gagal
     # terdekode agar kotak deteksi tidak "sibuk" menempel pada distraktor.
@@ -186,10 +186,35 @@ def _process_frame(
         # merupakan plat: pada motor, area jalan/roda di bawah frame dapat
         # terlihat seperti papan terang. Hasil OCR berformat NRKB harus menang
         # sebelum kedekatan dipakai sebagai pemecah seri.
-        readings = [
-            (det, *ocr.read_plate_robust(det.crop, det.meta.get("vehicle_class"), fast=fast))
-            for det in plates
-        ]
+        # Baca dari raw_crop resolusi penuh: pada crop 64 px huruf tipis
+        # (prefix "H") hilang dan yang tersisa justru stiker tanggal. Tampilan
+        # cadangan (crop bermargin & crop detektor) dibaca sekali bila snap
+        # pita teks memotong terlalu rapat.
+        readings = []
+        for det in plates:
+            raw = det.meta.get("raw_crop")
+            primary = raw if getattr(raw, "size", 0) else det.crop
+            readings.append(
+                (det, *ocr.read_plate_robust(primary, det.meta.get("vehicle_class"), fast=fast))
+            )
+            for view in (det.meta.get("full_crop"), det.crop):
+                if getattr(view, "size", 0) and view is not primary:
+                    readings.append((det, *ocr.read_plate(view)))
+            # Belum ada bacaan yang masuk golongan NRKB kendaraan -> zoom-out
+            # lalu baca pita-pita beririsan (crop rapat = kunci akurasi OCR).
+            if not any(
+                ocr._looks_like_plate(r[1]) and ocr.number_fits_class(r[1], r[0].meta.get("vehicle_class"))
+                for r in readings
+                if r[0] is det
+            ):
+                x1, y1, x2, y2 = (int(v) for v in det.bbox)
+                pad_x, pad_y = int((x2 - x1) * 0.25), max(int((y2 - y1) * 0.6), 20)
+                wide = image[
+                    max(y1 - pad_y, 0) : min(y2 + pad_y, image.shape[0]),
+                    max(x1 - pad_x, 0) : min(x2 + pad_x, image.shape[1]),
+                ]
+                for band in ocr.band_crops(wide):
+                    readings.append((det, *ocr.read_plate(band)))
         valid_readings = [r for r in readings if ocr._looks_like_plate(r[1])]
         confident_readings = [r for r in valid_readings if r[2] >= 0.5]
         pool = confident_readings or valid_readings or [r for r in readings if r[1] and r[2] >= 0.5] or readings
@@ -197,6 +222,7 @@ def _process_frame(
             pool,
             key=lambda r: (
                 1 if ocr._looks_like_plate(r[1]) else 0,
+                1 if ocr.number_fits_class(r[1], r[0].meta.get("vehicle_class")) else 0,
                 r[2],
                 pipeline.closeness(r[0], image.shape),
             ),

@@ -40,9 +40,9 @@ _TO_DIGIT = str.maketrans({
 })
 _TO_ALPHA = str.maketrans({
     "0": "O", "1": "I", "2": "Z", "4": "A", "5": "S", "6": "G",
-    "7": "T", "8": "B",
+    "7": "T", "8": "B", "Q": "O",
 })
-_AMBIGUOUS = set("OIZSBG012568")  # pasangan huruf-angka yang sering tertukar
+_AMBIGUOUS = set("OQIZSBG012568")  # pasangan huruf-angka yang sering tertukar
 
 # Kode wilayah TNKB tidak pernah memakai O/Q/I/L/angka. Plat Makassar "DD"
 # sering terbaca "00"/"O0" — koreksi HANYA blok prefix memakai peta ini, bukan
@@ -318,6 +318,24 @@ def _paddle_reader():
 
     paddle.set_flags({"FLAGS_use_mkldnn": False})
 
+    # Flag FLAGS_* belum cukup: prediktor statis paddlex tetap memakai oneDNN
+    # dan melempar NotImplementedError (ConvertPirAttribute2RuntimeAttribute).
+    # Paksa run_mode="paddle" (tanpa oneDNN) pada opsi prediktor.
+    try:
+        from paddlex.inference.models.runners.paddle_static.config.pp_option import (
+            PaddlePredictorOption,
+        )
+
+        original = PaddlePredictorOption.setdefault_by_model_name
+
+        def _without_mkldnn(self: Any, model_name: str) -> None:
+            self._cfg.setdefault("run_mode", "paddle")
+            original(self, model_name)
+
+        PaddlePredictorOption.setdefault_by_model_name = _without_mkldnn  # type: ignore[method-assign]
+    except Exception:  # noqa: BLE001 - paddlex versi lain biarkan perilaku bawaan
+        pass
+
     try:
         return PaddleOCR(
             use_doc_orientation_classify=False,
@@ -339,9 +357,8 @@ def _read_paddle(crop: Any) -> tuple[str, float]:
         lines = legacy[0] if legacy else None
         if not lines:
             return "", 0.0
-        text = "".join(item[1][0] for item in lines)
         confidence = float(sum(item[1][1] for item in lines) / len(lines))
-        return normalize_plate(text), round(confidence, 4)
+        return best_plate_text([item[1][0] for item in lines]), round(confidence, 4)
     if not result:
         return "", 0.0
     texts: list[str] = []
@@ -359,9 +376,9 @@ def _read_paddle(crop: Any) -> tuple[str, float]:
         confidences.extend(float(value) for value in ocr_res.get("rec_scores", []))
     if not texts:
         return "", 0.0
-    text = "".join(texts)
+    text = best_plate_text(texts)
     confidence = sum(confidences) / len(confidences) if confidences else 0.0
-    return normalize_plate(text), round(confidence, 4)
+    return text, round(confidence, 4)
 
 
 # --- Backend: EasyOCR ---------------------------------------------------------
@@ -382,7 +399,7 @@ def _read_easyocr(crop: Any) -> tuple[str, float]:
     # sekaligus mencegah karakter di luar format plat.
     fast = reader.recognize(crop, allowlist=_PLATE_ALLOW, detail=1)
     if fast:
-        text = "".join(item[1] if len(item) == 3 else item[0] for item in fast)
+        text = best_plate_text([item[1] if len(item) == 3 else item[0] for item in fast])
         conf = float(np.mean([item[2] if len(item) == 3 else item[1] for item in fast]))
         if len(re.sub(r"[^A-Z0-9]", "", text.upper())) >= 3 and conf >= 0.3:
             return normalize_plate(text), round(min(conf, 0.99), 4)
@@ -430,7 +447,7 @@ def _read_easyocr(crop: Any) -> tuple[str, float]:
         rows = [max(boxes, key=lambda b: b[2])]
     # Urut baca: sejajar baseline (baris) dulu, baru kiri->kanan.
     rows.sort(key=lambda b: (b[0], b[1]))
-    text = normalize_plate("".join(b[4] for b in rows))
+    text = best_plate_text([b[4] for b in rows])
     confidence = float(np.mean([b[3] for b in rows]))
     return text, round(min(confidence, 0.99), 4)
 
@@ -460,15 +477,65 @@ def _looks_like_plate(text: str) -> bool:
     compact = re.sub(r"[^A-Z0-9]", "", (text or "").upper())
     return bool(re.fullmatch(r"[A-Z]{1,3}[1-9][0-9]{0,3}[A-Z]{0,3}", compact))
 
+def band_crops(crop: Any, count: int = 4, frac: float = 0.38) -> list[Any]:
+    """Pita horizontal beririsan (zoom + crop otomatis saat belum terbaca).
+
+    Deteksi teks OCR hanya akurat pada crop rapat. Pada crop besar/tinggi, baris
+    plat tenggelam dan yang terbaca justru stiker tanggal. Pita beririsan
+    menjamin baris plat selalu masuk satu pita yang cukup rapat.
+    """
+    height_total = int(getattr(crop, "shape", (0,))[0] or 0)
+    if height_total < 40:
+        return []
+    height = max(int(height_total * frac), 32)
+    span = max(height_total - height, 0)
+    step = max(span // max(count - 1, 1), 1)
+    starts = list(range(0, span + 1, step))[:count]
+    return [crop[start : start + height] for start in starts]
+
+def _plate_candidates(texts: list[str]) -> list[str]:
+    """Kandidat teks plat dari kumpulan kotak hasil OCR.
+
+    OCR mengembalikan banyak kotak ('H', '2518', 'OK', stiker '12·26').
+    Menggabungkan semuanya selalu salah; teks plat biasanya hanya gabungan
+    1-3 kotak berurutan.
+    """
+    compact = [re.sub(r"[^A-Z0-9]", "", (text or "").upper()) for text in texts]
+    compact = [text for text in compact if text]
+    candidates: list[str] = []
+    for size in (1, 2, 3):
+        for index in range(len(compact) - size + 1):
+            candidates.append("".join(compact[index : index + size]))
+    joined = "".join(compact)
+    if joined not in candidates:
+        candidates.append(joined)
+    return candidates
+
+def best_plate_text(texts: list[str]) -> str:
+    """Pilih kandidat paling menyerupai NRKB — bukan teks terpanjang/tergabung.
+
+    Skor = (berformat NRKB, diawali huruf, panjang). Faktor kedua menjaga
+    sisa stiker tanggal ("05.22" -> "D522") tidak mengalahkan bacaan plat
+    asli yang diawali huruf.
+    """
+    best_text, best_score = "", (-1, -1, -1)
+    for candidate in _plate_candidates(texts):
+        normalized = normalize_plate(candidate)
+        valid = 1 if _looks_like_plate(normalized) else 0
+        score = (valid, 1 if candidate[:1].isalpha() else 0, len(normalized) if valid else 0)
+        if score > best_score:
+            best_score, best_text = score, normalized
+    return best_text
+
 def read_plate_robust(
     crop: Any, vehicle_class: str | None = None, *, fast: bool = False
 ) -> tuple[str, float, str]:
-    """Baca plat dengan strategi ulang: deglare + zoom + enhance, pilih terbaik.
+    """Baca plat dengan strategi ulang: baris per baris + zoom + deglare + threshold.
 
     Skor per pembacaan = (format plat, golongan NRKB cocok kelas kendaraan,
     keyakinan) — sengketa B/8, 6/G, 1/I diputus :func:`normalize_plate` sesuai
-    struktur NRKB. Berhenti awal bila valid + conf >= 0.80 atau dua varian
-    sepakat. Hasil di-cache per crop: auto-scan frame sama jadi instan.
+    struktur NRKB. Berhenti awal bila valid + conf >= 0.80. Hasil di-cache per
+    crop: auto-scan frame sama jadi instan.
     """
     from . import pipeline
 
@@ -477,39 +544,48 @@ def read_plate_robust(
     if cached is not None:
         return cached
 
-    # Jalur normal hanya memakai crop asli dan satu peningkatan kontras.
-    # Varian tambahan mahal; jalankan hanya bila dua percobaan awal tidak
-    # menghasilkan format NRKB yang valid.
-    variants = [crop] if fast else [crop, pipeline.enhance_plate(crop, 160)]
     best = ("", 0.0, "")
     best_score = (-1, -1, -1.0)
-    prev_text: str | None = None
-    for variant in variants:
+
+    def attempt(variant: Any) -> bool:
+        """Satu kali baca. True bila hasil sudah layak dan usaha boleh berhenti."""
+        nonlocal best, best_score
         if getattr(variant, "size", 0) == 0:
-            continue
+            return False
         text, confidence, backend = read_plate(variant)
         valid = 1 if _looks_like_plate(text) else 0
         fits = 1 if number_fits_class(text, vehicle_class) else 0
         score = (valid, fits, confidence)
         if score > best_score:
             best_score, best = score, (text, confidence, backend)
-        if valid and confidence >= 0.80:
-            break
-        if prev_text is not None and text and text == prev_text and valid:
-            break
-        prev_text = text
+        return bool(valid and confidence >= 0.80)
 
-    # Retry penuh juga saat hasil valid-struktur tapi keyakinan rendah: kesalahan
-    # baca akibat moiré sering tetap "terlihat seperti plat" (mis. BB1999OGI).
-    if not fast and (not _looks_like_plate(best[0]) or best_score[2] < 0.80):
-        for variant in (pipeline.deglare(crop), _enhance_ocr_crop(crop)):
-            text, confidence, backend = read_plate(variant)
-            valid = 1 if _looks_like_plate(text) else 0
-            fits = 1 if number_fits_class(text, vehicle_class) else 0
-            score = (valid, fits, confidence)
-            if score > best_score:
-                best_score, best = score, (text, confidence, backend)
-            if valid and confidence >= 0.80:
+    # Baris dibaca terpisah lebih dulu. Stiker tanggal/masa berlaku di bawah
+    # baris plat punya kontras lebih tinggi dan selalu "menang" baca bila
+    # seluruh crop dipakai sebagai satu teks — kasus "yang terbaca malah tahun".
+    rows = pipeline.text_rows(crop) if getattr(crop, "size", 0) else []
+    if len(rows) > 1:
+        rows.sort(key=lambda row: row.shape[0] * row.shape[1], reverse=True)
+        bases = [*rows, crop]
+    else:
+        bases = [crop]
+
+    for base in bases:
+        if attempt(base):
+            break
+    else:
+        # Belum terbaca -> naikkan kelas citra: zoom, deglare, binarisasi.
+        target = bases[0]
+        ladder = [
+            pipeline.enhance_plate(target, 160),
+            pipeline.enhance_plate(target, 240),
+            pipeline.deglare(target),
+            _enhance_ocr_crop(target),
+        ]
+        if fast:
+            ladder = ladder[:2]  # auto-scan tetap coba ulang, tapi tetap murah
+        for variant in ladder:
+            if attempt(variant):
                 break
 
     if len(_ROBUST_CACHE) >= 32:

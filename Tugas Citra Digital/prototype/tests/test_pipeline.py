@@ -33,7 +33,7 @@ def test_normalize_plate() -> None:
         "8 1234 XYZ": "B1234XYZ",  # 8 di blok huruf depan = B
         "BI234XYZ": "B1234XYZ",  # I di blok angka = 1
         "D 5678 ABC": "D5678ABC",
-        "B 9O12 QWE": "B9012QWE",  # O di blok angka = 0
+        "B 9O12 QWE": "B9012OWE",  # O di blok angka = 0; Q bukan huruf NRKB -> O
         "B1G34XYZ": "B1634XYZ",  # G di blok angka = 6
         "B1234X6": "B1234XG",  # 6 di blok huruf belakang = G
         "81257PR": "B1257PR",  # 8 di prefix dan 5 di angka
@@ -210,6 +210,19 @@ def test_read_plate_robust() -> None:
         check("retry membaca plat valid", text == "B1234XYZ", f"(dapat {text!r} [{backend}])")
         check("retry keyakinan wajar", conf > 0.5, f"(dapat {conf})")
 
+def test_date_sticker_row() -> None:
+    print("stiker tanggal di bawah baris plat")
+    cv2, np = pipeline._cv2(), pipeline._np()
+    plate = simulate.render_plate("B 1234 XYZ", height=110, aspect=3.54)
+    # Stiker masa berlaku (mis. "12 26") di bawah plat: kecil tapi kontras
+    # tinggi — pembaca lama menyerah pada stiker ini, bukan pada nomor plat.
+    h, w = plate.shape[:2]
+    canvas = np.full((h + 44, w, 3), 255, np.uint8)
+    canvas[:h] = plate
+    cv2.putText(canvas, "12 26", (int(w * 0.33), h + 34), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 2)
+    text, conf, _ = ocr.read_plate_robust(canvas)
+    check("baris plat menang atas stiker tanggal", text == "B1234XYZ", f"(dapat {text!r} conf {conf})")
+
 def test_filter_gate_zone() -> None:
     print("filter_gate_zone (ROI gate + ukuran minimum)")
 
@@ -257,6 +270,20 @@ def test_plate_text_quality_gate() -> None:
     check("nol setelah digit pertama diperbolehkan", ocr._looks_like_plate("DD2060XCL"))
     check("nomor urut valid", ocr.number_group("DD2760XCL") == 2760)
     check("nomor urut nol ditolak", ocr.number_group("DD02760XCL") is None)
+    check(
+        "kandidat kotak OCR: plat menang atas stiker tanggal",
+        ocr.best_plate_text(["H", "2518", "OK", "12 26"]) == "H2518OK",
+        f"(dapat {ocr.best_plate_text(['H', '2518', 'OK', '12 26'])!r})",
+    )
+    check(
+        "gabungan penuh yang menyertakan stiker ditolak",
+        ocr.best_plate_text(["H2518OK", "1226"]) == "H2518OK",
+    )
+    check(
+        "Q di blok huruf = O (H 2518 QK -> H2518OK)",
+        ocr.best_plate_text(["H", "2518", "QK", "12 26"]) == "H2518OK",
+        f"(dapat {ocr.best_plate_text(['H', '2518', 'QK', '12 26'])!r})",
+    )
     winner, _ = fusion.vote_plate([("O02760XCL1029", 0.9), ("B 1234 X6", 0.8)])
     check("voting membuang teks melanggar aturan", winner == "B1234XG", f"(dapat {winner!r})")
     winner, _ = fusion.vote_plate([("O02760XCL1029", 0.9)])
@@ -382,6 +409,7 @@ def main() -> int:
         test_plate_text_quality_gate,
         test_signed_sticker_token,
         test_read_plate_robust,
+        test_date_sticker_row,
         test_monitor_moire,
         test_distractors,
         test_decide,

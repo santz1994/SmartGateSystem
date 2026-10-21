@@ -452,6 +452,37 @@ def split_rows(crop: Any) -> list[Any]:
         return [crop]
     return [crop[: best[0]], crop[best[0] + best[1] :]]
 
+def text_rows(crop: Any, min_height_frac: float = 0.10) -> list[Any]:
+    """Semua pita baris yang layak dibaca OCR, termasuk baris pendek.
+
+    Berbeda dengan :func:`split_rows` (syaratnya ketat, khusus memutus plat
+    1 vs 2 baris), fungsi ini longgar: stiker tanggal "12 26" setinggi ~10 px
+    di bawah nomor plat harus ikut terpisah, karena bila seluruh crop dibaca
+    sebagai satu teks, stiker itulah yang menang dibaca — bukan nomor plat.
+    Pita tipis (border/bingkai) dibuang lewat ``min_height_frac``.
+    """
+    binary = _ink_mask(crop)
+    h, w = binary.shape
+    if h < 16:
+        return [crop]
+    ink = (binary > 0).sum(axis=1)
+    threshold = max(1, int(w * 0.01))
+    min_height = max(4, int(h * min_height_frac))
+    bands: list[tuple[int, int]] = []
+    start: int | None = None
+    for y, value in enumerate(ink):
+        if value > threshold and start is None:
+            start = y
+        elif value <= threshold and start is not None:
+            bands.append((start, y))
+            start = None
+    if start is not None:
+        bands.append((start, h))
+    bands = [(a, b) for a, b in bands if b - a >= min_height]
+    if not bands:
+        return [crop]
+    return [crop[a:b] for a, b in bands[:4]]
+
 def snap_to_text_band(crop: Any) -> tuple[Any, tuple[int, int, int, int]]:
     """Persempit kandidat ke pita teks plat, buang konteks bodi kendaraan.
 
@@ -735,6 +766,7 @@ def detect_plates_classic(image: Any, max_candidates: int = 8) -> list[Detection
                 crop=normalize_plate_size(ocr_view),
                 meta={
                     "raw_crop": ocr_view,
+                    "full_crop": pad_crop(full_crop),
                     "border": round(border, 4),
                     "vehicle_class": vehicle_class,
                     "orientation": orientation,

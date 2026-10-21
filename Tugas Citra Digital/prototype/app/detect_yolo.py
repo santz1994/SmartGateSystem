@@ -249,6 +249,7 @@ def detect(image: Any, max_candidates: int = 4) -> list[Detection]:
         # tiap frame (loncat-loncat) membingungkan petugas dan tampak memotong
         # papan plat. Konteks bodi tetap dibuang oleh snap pada ocr_crop di bawah.
         ocr_crop = four_point_transform(image, _padded_quad(quad, image.shape))
+        full_crop = ocr_crop  # crop bermargin: tampilan cadangan bila snap terlalu rapat
         # Bobot lama kadang memberi box sedikit lebih besar dari papan plat.
         # Buang konteks bodi/roda sebelum EasyOCR agar suffix tidak tenggelam
         # oleh teks dan tepi lain di dalam box.
@@ -262,6 +263,7 @@ def detect(image: Any, max_candidates: int = 4) -> list[Detection]:
                 crop=normalize_plate_size(ocr_crop),
                 meta={
                     "raw_crop": ocr_crop,
+                    "full_crop": full_crop,
                     "detector_crop": crop,
                     "border": round(border, 4),
                     "vehicle_class": vehicle_class,

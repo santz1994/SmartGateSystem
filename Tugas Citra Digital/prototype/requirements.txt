@@ -4,8 +4,8 @@ numpy>=1.24
 Pillow>=10.0
 Flask>=3.0
 
-# --- OCR produksi (EasyOCR) ---
-# EasyOCR dipakai sebagai backend utama pada Windows CPU.
+# --- OCR produksi ---
+# PaddleOCR adalah backend utama; EasyOCR fallback otomatis.
 easyocr>=1.7
 
 # --- OCR alternatif ---

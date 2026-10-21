@@ -32,9 +32,10 @@ DEFAULTS: dict[str, float] = {
 # Bobot fusi: stiker adalah *penguat*, bukan syarat.
 FUSION_WEIGHTS = {"plate": 1.0, "sticker": 0.95}
 
-# EasyOCR adalah backend produksi default pada Windows CPU; PaddleOCR tetap
-# tersedia sebagai opsi melalui SGS_OCR_BACKEND=paddleocr.
-OCR_BACKEND = os.getenv("SGS_OCR_BACKEND", "easyocr").lower()
+# PaddleOCR adalah backend produksi (terbukti jauh lebih akurat pada font plat
+# Indonesia); EasyOCR jatuh jadi fallback otomatis bila PaddleOCR tidak terpasang
+# atau gagal inisialisasi. Override runtime lewat SGS_OCR_BACKEND.
+OCR_BACKEND = os.getenv("SGS_OCR_BACKEND", "paddleocr").lower()
 CLAHE_CLIP_LIMIT = float(os.getenv("SGS_CLAHE_CLIP_LIMIT", str(DEFAULTS["clahe_clip_limit"])))
 DETECTION_GAMMA = float(os.getenv("SGS_DETECTION_GAMMA", "1.15"))
 DETECTION_ROI = tuple(

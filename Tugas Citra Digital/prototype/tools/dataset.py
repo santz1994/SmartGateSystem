@@ -19,7 +19,19 @@ from typing import Iterator, NamedTuple
 ROOT = Path(__file__).resolve().parent.parent
 DATASETS = ROOT / "datasets"
 DETECTION_DIR = DATASETS / "detection"
-TEXT_DIR = DATASETS / "text"
+# Dataset teks berlabel hidup di dua lokasi historis; pilih yang benar-benar ada
+# agar tools/eval_real.py benar-benar mengukur akurasi OCR pada crop nyata.
+TEXT_DIR = next(
+    (
+        path
+        for path in (
+            DATASETS / "text",
+            ROOT / "dataset_extra" / "ocr_reference" / "plate_text_dataset",
+        )
+        if (path / "label.csv").is_file()
+    ),
+    DATASETS / "text",
+)
 IMAGE_EXT = (".jpg", ".jpeg", ".png", ".bmp")
 
 # COCO membaur jpg + png; urutan daftar ini menentukan urutan hasil, jadi

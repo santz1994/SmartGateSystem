@@ -213,9 +213,15 @@ if (camVideo) {
     busy = true;
     statusEl.textContent = 'Memindai…';
     try {
-      const blob = await snapBlob();
       const form = new FormData();
-      form.append('images', blob, 'camera.jpg');
+      // Scan simpan-log memotret beberapa frame berurutan: bila satu frame gagal
+      // dibaca (silau/kabur), voting antar-frame pada sesi yang sama tetap bisa
+      // menyelamatkan hasil — "capture ulang" sebelum menyerah.
+      const shots = persist ? 3 : 1;
+      for (let i = 0; i < shots; i += 1) {
+        if (i) await new Promise((resolve) => setTimeout(resolve, 150));
+        form.append('images', await snapBlob(), `camera${i + 1}.jpg`);
+      }
       const params = new URLSearchParams({
         persist: persist ? '1' : '0',
         plate: plateEnabled ? '1' : '0',
