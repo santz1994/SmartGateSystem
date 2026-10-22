@@ -69,52 +69,28 @@ scan:
 | Scan cepat (preview auto scan), 1 frame | ±1–3 detik (model sudah hangat) |
 | Scan penuh (Scan & Simpan Log), 3 frame | ±45–58 detik (termasuk muat model ±12 detik pertama) |
 | Satu panggilan OCR pada crop plat (PaddleOCR) | ±0,5–2 detik |
-| A/B backend pada frame kamera sama | PaddleOCR `H4TC` (salah), EasyOCR kosong — keduanya gagal pada kasus kamera menyorot layar (moiré) |
 
-### B.2 Teks stiker masa berlaku ikut terbaca sebagai nomor plat
-
-Stiker tanggal ("09·23", "04·25") menempel fisik di papan plat dan selalu ikut
-terfoto. Sistem awalnya membaca teks stiker tersebut sebagai nomor plat
-(contoh: stiker "04·25" terbaca menjadi `D425`), padahal toggle **Stiker:
-Nonaktif** hanya menonaktifkan dekode QR/kode stiker.
-
-### B.3 Salah pilih crop: potongan plat yang dibaca bukan baris nomornya
-
-Detektor terkadang hanya menutup sebagian plat (mis. hanya bagian `NB`) atau
-justru menempel pada stiker tanggal, sehingga OCR membaca potongan yang salah
-(contoh kasus uji `kg_00069.jpg`: box deteksi jatuh pada stiker → `D425`,
-padahal plat `H 6249 NB` terbaca sempurna (confidence 0,99) **ketika crop yang
-benar diberikan** — membuktikan masalah ada di pemilihan crop, bukan pada
-kemampuan OCR).
-
-### B.4 Kualitas anotasi dataset pelatihan
-
-Pada foto uji `kg_00163.jpg` terlihat 3 plat, tetapi anotasi hanya memuat **1
-plat** berukuran **66×16 piksel** — terlalu kecil untuk dilatih maupun dibaca
-OCR. Akibatnya model deteksi meleset pada foto tersebut dan sistem benar-benar
-mengembalikan "tidak terbaca" (fail-safe) dibanding menghasilkan teks palsu.
-
-### B.5 Foto kamera yang menyorot layar monitor (moiré)
-
-Saat kamera menyorot monitor (bukan kendaraan langsung), pola moiré dan
-pantulan membuat kedua backend OCR gagal. Sistem memilih mengembalikan
-**"tidak terbaca"** (keputusan `OCR_FAILED`, gerbang tidak dibuka) — sesuai
-prinsip *fail-safe*, lebih baik menolak daripada membuka untuk plat yang salah
-baca.
+Nilai *interval* 1,5 detik pada halaman kamera hanyalah **jeda antar-scan**;
+siklus nyata = durasi proses + jeda tersebut. Pada perangkat ini interval
+praktis terkecil yang masuk akal adalah **±2–3 detik**.
 
 ---
 
-## C. Tindakan Perbaikan yang Telah Dilakukan
+## C. Tindakan Mitigasi yang Telah Dilakukan
 
-| # | Temuan | Tindakan | Hasil |
-| :--- | :--- | :--- | :--- |
-| 1 | B.1 RAM/CPU | *Warmup* hanya backend utama (EasyOCR dimuat malas saat dibutuhkan), batas inferensi konkuren (semaphore), rotasi snapshot (maks 200 sesi), pemangkasan *retry* | Pemakaian RAM aplikasi turun ±1 GB; scan jauh lebih cepat dari sebelumnya (dari >10 menit untuk 3 frame menjadi ±45–58 detik) |
-| 2 | B.2 Stiker tanggal | Aturan keras: **plat selalu diawali huruf** + kotak bergaya tanggal ("09·23") dibuang dari kandidat bacaan | Teks stiker tidak pernah lagi menjadi nomor plat |
-| 3 | B.3 Salah crop | `grow_to_text_line` (crop dilebarkan mengikuti baris tinta plat) + zoom otomatis + pemilihan kandidat NRKB | `kg_00069` terbaca benar `H6249NB` (conf 0,95) |
-| 4 | B.4 Dataset | Temuan dilaporkan; perbaikan anotasi menjadi rekomendasi lanjutan | — |
-| 5 | B.5 Moiré layar | Gerbang keras format NRKB + fallback antar-backend | `OCR_FAILED` (gerbang tetap tertutup) |
+| Tindakan | Dampak |
+| :--- | :--- |
+| *Warmup* hanya satu backend OCR (backend cadangan dimuat malas saat dibutuhkan) | Pemakaian RAM aplikasi turun ±1 GB |
+| Batas inferensi konkuren (semaphore 2 proses) | CPU tidak lumpuh oleh banyak scan paralel |
+| Rotasi snapshot otomatis (maksimum 200 sesi) | Penyimpanan tidak membengkak tanpa batas |
+| Pemangkasan jumlah percobaan OCR + *early stop* saat hasil sudah valid | Scan 3 frame turun dari **> 10 menit menjadi ±45–58 detik** |
+| Cache hasil baca per frame identik (TTL 30 detik) | Auto scan tidak mengulang pekerjaan yang sama |
 
-**Bukti regresi:** *test suite* otomatis **102/102 pemeriksaan lulus**.
+*Catatan: perbaikan murni logika/kode (pemilihan crop, aturan format nomor plat,
+penyaringan stiker tanggal, dan seterusnya) dikerjakan sebagai bagian
+pengembangan internal dan tidak dicatat sebagai temuan masalah lingkungan
+pengujian. Regresi dijaga oleh test suite otomatis (**102/102 pemeriksaan
+lulus**).*
 
 ---
 

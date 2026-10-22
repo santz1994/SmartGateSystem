@@ -220,6 +220,8 @@ if (camVideo) {
       canvas.toBlob(resolve, 'image/jpeg', 0.78);
     });
 
+  let lastScanMs = 0;
+
   async function scan(persist) {
     if (busy) return;
     if (!stream || !camVideo.videoWidth) {
@@ -230,8 +232,7 @@ if (camVideo) {
     }
     busy = true;
     statusEl.textContent = 'Memindai…';
-    const startedAt = performance.now();
-    try {
+    const startedAt = performance.now();    try {
       const form = new FormData();
       // Scan simpan-log memotret beberapa frame berurutan: bila satu frame gagal
       // dibaca (silau/kabur), voting antar-frame pada sesi yang sama tetap bisa
@@ -267,6 +268,7 @@ if (camVideo) {
       statusEl.textContent = `Gagal: ${err.message} (${elapsed} dtk)`;
     } finally {
       busy = false;
+      lastScanMs = performance.now() - startedAt;
       if ($('#cam-auto').checked && stream) scheduleNext();
     }
   }
@@ -331,7 +333,10 @@ if (camVideo) {
 
   function scheduleNext(immediate = false) {
     if (timer) clearTimeout(timer);
-    const ms = immediate ? 0 : Number($('#cam-interval').value) || 1000;
+    const interval = Number($('#cam-interval').value) || 1000;
+    // Jeda dikurangi durasi proses terakhir agar siklus nyata ≈ interval
+    // (tanpa ini, siklus = interval + durasi proses dan terasa "tidak cepat").
+    const ms = immediate ? 0 : Math.max(250, interval - (lastScanMs || 0));
     timer = setTimeout(() => {
       timer = null;
       scan(false);
