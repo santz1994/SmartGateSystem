@@ -640,16 +640,18 @@ def active_backend() -> str:
     return "template_match"
 
 def warmup() -> None:
-    """Muat model OCR di background saat server start — scan pertama tidak lambat."""
+    """Muat model OCR di background saat server start — scan pertama tidak lambat.
+
+    Hanya backend utama yang dipanaskan. Backend penyelamat (EasyOCR/PyTorch)
+    dimuat malas saat pertama kali dibutuhkan — RAM terbatas, memuat keduanya
+    sekaligus membuat mesin kehabisan memori.
+    """
     try:
         backend = active_backend()
         if backend == "easyocr":
             _easy_reader()
         elif backend == "paddleocr":
             _paddle_reader()
-            # Backend penyelamat ikut dipanaskan agar fallback pertama tidak lambat.
-            if importlib_available("easyocr"):
-                _easy_reader()
     except Exception:  # noqa: BLE001 - warmup gagal jangan menahan server
         pass
 
