@@ -211,33 +211,59 @@ def _process_frame(
         # cadangan (crop bermargin & crop detektor) dibaca sekali bila snap
         # pita teks memotong terlalu rapat.
         readings = []
-        for det in plates:
+        stop = False
+
+        def strong(result: tuple[str, float, str]) -> bool:
+            text, confidence, _ = result
+            return ocr._looks_like_plate(text) and confidence >= 0.80 and len(text) >= 6
+
+        for index, det in enumerate(plates):
+            if stop:
+                break
             raw = det.meta.get("raw_crop")
             primary = raw if getattr(raw, "size", 0) else det.crop
-            readings.append(
-                (det, *ocr.read_plate_robust(primary, det.meta.get("vehicle_class"), fast=fast))
-            )
+            vehicle_class = det.meta.get("vehicle_class")
+            # Urutan view: crop tumbuh ke baris tinta plat (paling berhasil
+            # empiris, satu kali baca sering langsung tuntas) -> robust ladder
+            # pada crop utama -> view cadangan.
+            views: list[tuple[Any, bool]] = [
+                (pipeline.grow_to_text_line(image, det.bbox), False),
+                (primary, True),
+            ]
             for view in (det.meta.get("full_crop"), det.crop):
                 if getattr(view, "size", 0) and view is not primary:
-                    readings.append((det, *ocr.read_plate(view)))
-            # Belum ada bacaan yang masuk golongan NRKB kendaraan -> zoom-out
-            # lalu baca pita-pita beririsan (crop rapat = kunci akurasi OCR).
-            if not any(
-                ocr._looks_like_plate(r[1]) and ocr.number_fits_class(r[1], r[0].meta.get("vehicle_class"))
+                    views.append((view, False))
+            for view, use_robust in views:
+                reading = (
+                    ocr.read_plate_robust(view, vehicle_class, fast=fast)
+                    if use_robust
+                    else ocr.read_plate(view)
+                )
+                readings.append((det, *reading))
+                if strong(reading):
+                    stop = True
+                    break
+            if stop or index > 1:
+                continue
+            # Pemulihan mahal (pita beririsan) hanya kandidat teratas & bila
+            # belum ada bacaan berformat golongan NRKB kendaraan.
+            if any(
+                ocr._looks_like_plate(r[1]) and ocr.number_fits_class(r[1], vehicle_class)
                 for r in readings
                 if r[0] is det
             ):
-                # 1) tumbuhkan crop ke baris tinta plat utuh (kotak sering hanya
-                #    menutup sebagian plat), 2) zoom-out + pita beririsan.
-                readings.append((det, *ocr.read_plate(pipeline.grow_to_text_line(image, det.bbox))))
-                x1, y1, x2, y2 = (int(v) for v in det.bbox)
-                pad_x, pad_y = int((x2 - x1) * 0.25), max(int((y2 - y1) * 0.6), 20)
-                wide = image[
-                    max(y1 - pad_y, 0) : min(y2 + pad_y, image.shape[0]),
-                    max(x1 - pad_x, 0) : min(x2 + pad_x, image.shape[1]),
-                ]
-                for band in ocr.band_crops(wide):
-                    readings.append((det, *ocr.read_plate(band)))
+                continue
+            x1, y1, x2, y2 = (int(v) for v in det.bbox)
+            pad_x, pad_y = int((x2 - x1) * 0.25), max(int((y2 - y1) * 0.6), 20)
+            wide = image[
+                max(y1 - pad_y, 0) : min(y2 + pad_y, image.shape[0]),
+                max(x1 - pad_x, 0) : min(x2 + pad_x, image.shape[1]),
+            ]
+            for band in ocr.band_crops(wide, count=2):
+                reading = ocr.read_plate(band)
+                readings.append((det, *reading))
+                if strong(reading):
+                    break
         valid_readings = [r for r in readings if ocr._looks_like_plate(r[1])]
         confident_readings = [r for r in valid_readings if r[2] >= 0.5]
         pool = confident_readings or valid_readings or [r for r in readings if r[1] and r[2] >= 0.5] or readings

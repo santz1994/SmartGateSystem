@@ -583,7 +583,7 @@ def read_plate_robust(
     rows = pipeline.text_rows(crop) if getattr(crop, "size", 0) else []
     if len(rows) > 1:
         rows.sort(key=lambda row: row.shape[0] * row.shape[1], reverse=True)
-        bases = [*rows, crop]
+        bases = [*rows[:2], crop]  # maks 2 baris + crop utuh — sisanya tidak relevan
     else:
         bases = [crop]
 
@@ -599,12 +599,7 @@ def read_plate_robust(
         ladder: list[Any] = [
             cv2.resize(target, None, fx=s, fy=s, interpolation=cv2.INTER_CUBIC) for s in scales
         ]
-        ladder += [
-            pipeline.enhance_plate(target, 160),
-            pipeline.enhance_plate(target, 240),
-            pipeline.deglare(target),
-            _enhance_ocr_crop(target),
-        ]
+        ladder += [pipeline.enhance_plate(target, 160), pipeline.deglare(target)]
         if fast:
             ladder = ladder[:2]  # auto-scan tetap coba ulang, tapi tetap murah
         for variant in ladder:
