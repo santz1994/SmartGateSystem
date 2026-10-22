@@ -230,6 +230,7 @@ if (camVideo) {
     }
     busy = true;
     statusEl.textContent = 'Memindai…';
+    const startedAt = performance.now();
     try {
       const form = new FormData();
       // Scan simpan-log memotret beberapa frame berurutan: bila satu frame gagal
@@ -255,9 +256,15 @@ if (camVideo) {
       if (!res.ok) throw new Error(data.error || 'Gagal memindai');
       resultBox.innerHTML = renderResult(data);
       drawDetections(data);
-      statusEl.textContent = `Plat: ${data.plate_text || 'tidak terbaca'} (${data.plate_confidence.toFixed(2)}) — ${data.decision_label}`;
+      const elapsed = ((performance.now() - startedAt) / 1000).toFixed(1);
+      resultBox.insertAdjacentHTML(
+        'afterbegin',
+        `<p class="muted small">Waktu baca: ${elapsed} dtk${persist ? ' (3 frame, jalur penuh)' : ' (jalur cepat)'}</p>`
+      );
+      statusEl.textContent = `Plat: ${data.plate_text || 'tidak terbaca'} (${data.plate_confidence.toFixed(2)}) — ${data.decision_label} · ${elapsed} dtk`;
     } catch (err) {
-      statusEl.textContent = `Gagal: ${err.message}`;
+      const elapsed = ((performance.now() - startedAt) / 1000).toFixed(1);
+      statusEl.textContent = `Gagal: ${err.message} (${elapsed} dtk)`;
     } finally {
       busy = false;
       if ($('#cam-auto').checked && stream) scheduleNext();
