@@ -295,6 +295,12 @@ def test_plate_text_quality_gate() -> None:
         ocr.best_plate_text(["04 25"]) == "" and ocr.best_plate_text(["0425", "1226"]) == "",
         f"(dapat {ocr.best_plate_text(['04 25'])!r} / {ocr.best_plate_text(['0425', '1226'])!r})",
     )
+    check(
+        "kotak stiker tanggal dibuang dari kandidat plat",
+        ocr.best_plate_text(["H", "6249", "BV", "09 23"]) == "H6249BV"
+        and ocr.best_plate_text(["09 23"]) == "",
+        f"(dapat {ocr.best_plate_text(['H', '6249', 'BV', '09 23'])!r})",
+    )
     winner, _ = fusion.vote_plate([("O02760XCL1029", 0.9), ("B 1234 X6", 0.8)])
     check("voting membuang teks melanggar aturan", winner == "B1234XG", f"(dapat {winner!r})")
     winner, _ = fusion.vote_plate([("O02760XCL1029", 0.9)])

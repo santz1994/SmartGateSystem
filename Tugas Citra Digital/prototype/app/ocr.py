@@ -499,6 +499,12 @@ def band_crops(crop: Any, count: int = 4, frac: float = 0.38) -> list[Any]:
     starts = list(range(0, span + 1, step))[:count]
     return [crop[start : start + height] for start in starts]
 
+# Stiker masa berlaku ("09·23", "04 25", "12.26") menempel fisik di plat dan
+# selalu ikut terbaca. Wajib ada PEMISAH agar blok angka plat ("2518") tidak
+# ikut terbuang; sisanya (bentuk murni angka) sudah dinetralisir aturan
+# huruf-depan di best_plate_text.
+_DATE_LIKE = re.compile(r"^\d{1,2}[.\-·\s]\d{2,4}$")
+
 def _plate_candidates(texts: list[str]) -> list[str]:
     """Kandidat teks plat dari kumpulan kotak hasil OCR.
 
@@ -506,7 +512,11 @@ def _plate_candidates(texts: list[str]) -> list[str]:
     Menggabungkan semuanya selalu salah; teks plat biasanya hanya gabungan
     1-3 kotak berurutan.
     """
-    compact = [re.sub(r"[^A-Z0-9]", "", (text or "").upper()) for text in texts]
+    compact = [
+        re.sub(r"[^A-Z0-9]", "", (text or "").upper())
+        for text in texts
+        if not _DATE_LIKE.match((text or "").strip())
+    ]
     compact = [text for text in compact if text]
     candidates: list[str] = []
     for size in (1, 2, 3):
@@ -637,22 +647,55 @@ def warmup() -> None:
             _easy_reader()
         elif backend == "paddleocr":
             _paddle_reader()
+            # Backend penyelamat ikut dipanaskan agar fallback pertama tidak lambat.
+            if importlib_available("easyocr"):
+                _easy_reader()
     except Exception:  # noqa: BLE001 - warmup gagal jangan menahan server
         pass
 
 def read_plate(crop: Any) -> tuple[str, float, str]:
-    """Baca plat dari crop yang sudah di-deskew. -> (teks, keyakinan, backend)."""
+    """Baca plat dari crop yang sudah di-deskew. -> (teks, keyakinan, backend).
+
+    Rantai fallback: backend utama (PaddleOCR) dulu — cepat dan akurat pada
+    foto dataset. Bila hasilnya gagal format NRKB (kasus kamera langsung / moiré
+    layar yang lebih dikuasai EasyOCR), backend kedua mencoba menyelamatkan.
+    Biaya tambahan hanya dibayar saat gagal.
+    """
+    first = ("", 0.0, "template_match")
     if active_backend() == "paddleocr":
         try:
             text, confidence = _read_paddle(crop)
-            return text, confidence, "paddleocr"
+            first = (text, confidence, "paddleocr")
         except Exception:  # noqa: BLE001 - fallback tetap menjaga service hidup
             LOGGER.exception("PaddleOCR gagal membaca crop plat")
-    if active_backend() == "easyocr":
+    elif active_backend() == "easyocr":
         try:
             text, confidence = _read_easyocr(crop)
-            return text, confidence, "easyocr"
+            first = (text, confidence, "easyocr")
         except Exception:  # noqa: BLE001 - jatuh ke template_match bila model belum ada
             pass
+    if _looks_like_plate(first[0]):
+        return first
+
+    second_backend = "easyocr" if first[2] == "paddleocr" else "paddleocr"
+    if importlib_available(second_backend):
+        try:
+            text, confidence = (
+                _read_easyocr(crop) if second_backend == "easyocr" else _read_paddle(crop)
+            )
+            if _looks_like_plate(text):
+                return text, confidence, second_backend
+            if confidence > first[1]:
+                first = (text, confidence, second_backend)
+        except Exception:  # noqa: BLE001 - cukup pakai hasil pertama
+            LOGGER.exception("%s gagal sebagai penyelamat", second_backend)
+
+    if first[0] or first[1]:
+        return first
     text, confidence = _read_template_multiline(crop)
     return text, confidence, "template_match"
+
+def importlib_available(module: str) -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec(module) is not None
