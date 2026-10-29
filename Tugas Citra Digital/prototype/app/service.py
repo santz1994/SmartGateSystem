@@ -154,7 +154,9 @@ MAX_SNAPSHOT_SESSIONS = 200
 
 # Batas inferensi konkuren (M2): beberapa request YOLO+OCR paralel cukup untuk
 # membuat CPU jenuh. Slot global, lintas request.
-_INFERENCE_SLOTS = threading.Semaphore(int(os.getenv("SGS_MAX_CONCURRENT_INFER", "2")))
+# Satu inferensi pada satu waktu: pada CPU 4-core dua scan paralel saling
+# memperlambat (thread pool penuh) — antre lebih cepat daripada berbagi CPU.
+_INFERENCE_SLOTS = threading.Semaphore(int(os.getenv("SGS_MAX_CONCURRENT_INFER", "1")))
 
 def _prune_snapshots() -> None:
     if not config.SNAPSHOT_DIR.is_dir():

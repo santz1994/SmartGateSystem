@@ -332,6 +332,7 @@ def _paddle_reader():
 
         def _without_mkldnn(self: Any, model_name: str) -> None:
             self._cfg.setdefault("run_mode", "paddle")
+            self._cfg.setdefault("cpu_threads", config.CPU_THREADS)
             original(self, model_name)
 
         PaddlePredictorOption.setdefault_by_model_name = _without_mkldnn  # type: ignore[method-assign]
@@ -350,7 +351,55 @@ def _paddle_reader():
         return PaddleOCR(use_angle_cls=False, lang="en", show_log=False)
 
 
+@lru_cache(maxsize=1)
+def _paddle_rec_model() -> Any | None:
+    """Model recognizer saja (tanpa deteksi) untuk jalur cepat. ``None`` bila tak ada."""
+    try:
+        from paddlex import create_model
+
+        return create_model(model_name="PP-OCRv6_medium_rec")
+    except Exception:  # noqa: BLE001 — opsional; jalur penuh tetap tersedia
+        return None
+
+def _read_paddle_rec_only(crop: Any) -> tuple[str, float]:
+    """Recognizer langsung pada pita teks — tanpa deteksi teks (~6x lebih cepat)."""
+    model = _paddle_rec_model()
+    if model is None or getattr(crop, "size", 0) == 0:
+        return "", 0.0
+    texts: list[str] = []
+    scores: list[float] = []
+    for item in model.predict(input=crop, batch_size=1):
+        data: Any = item
+        json_fn = getattr(item, "json", None)
+        if callable(json_fn):
+            data = json_fn()
+        if isinstance(data, str):
+            import json
+
+            data = json.loads(data)
+        res = data.get("res", data) if isinstance(data, dict) else {}
+        if res.get("rec_texts") is not None:
+            texts.extend(str(value) for value in res["rec_texts"])
+            scores.extend(float(value or 0.0) for value in res.get("rec_scores") or [])
+        elif res.get("rec_text") is not None:
+            texts.append(str(res["rec_text"]))
+            scores.append(float(res.get("rec_score") or 0.0))
+    if not texts:
+        return "", 0.0
+    confidence = sum(scores) / len(scores) if scores else 0.0
+    return best_plate_text(texts), round(confidence, 4)
+
 def _read_paddle(crop: Any) -> tuple[str, float]:
+    # Jalur cepat: recognizer tanpa deteksi teks. Crop sudah pita teks plat —
+    # model deteksi justru memakan ~2,5 dari ~2,9 dtk per pembacaan di CPU uji.
+    # Hasil tidak berformat plat (multi-baris, crop salah) jatuh ke pipeline
+    # det+rec penuh di bawah — jalur cepat hanya mengambil alih bila jelas benar.
+    try:
+        text, confidence = _read_paddle_rec_only(crop)
+        if _looks_like_plate(text) and confidence >= 0.5:
+            return text, confidence
+    except Exception:  # noqa: BLE001 — jalur cepat opsional, gagal = pakai jalur penuh
+        pass
     reader = _paddle_reader()
     if hasattr(reader, "predict"):
         result = reader.predict(crop)
@@ -389,6 +438,9 @@ _PLATE_ALLOW = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 @lru_cache(maxsize=1)
 def _easy_reader():
+    import torch
+
+    torch.set_num_threads(config.CPU_THREADS)
     import easyocr
 
     return easyocr.Reader(["en"], gpu=False, verbose=False)
@@ -651,6 +703,7 @@ def warmup() -> None:
         if backend == "easyocr":
             _easy_reader()
         elif backend == "paddleocr":
+            _paddle_rec_model()  # jalur cepat dipakai paling sering
             _paddle_reader()
     except Exception:  # noqa: BLE001 - warmup gagal jangan menahan server
         pass

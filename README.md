@@ -36,10 +36,16 @@ dibuat otomatis.
 
 Environment lain: `SGS_OCR_BACKEND`, `SGS_YOLO_WEIGHTS`, `SGS_DETECTION_ROI`,
 `SGS_CLAHE_CLIP_LIMIT`, `SGS_REQUIRE_SIGNED_STICKER` (default `1` = QR stiker
-wajib bertanda tangan `SGS1.*`). Kesehatan sistem: `GET /api/health` (butuh
-login). Deploy produksi: `python run.py --prod` (waitress) di belakang reverse
-proxy. Catatan: backend OCR (`SGS_OCR_BACKEND`) & varian YOLO dibaca saat
-aplikasi start — ganti env butuh restart.
+wajib bertanda tangan `SGS1.*`), `SGS_CPU_THREADS` (batas thread inferensi),
+`SGS_MAX_CONCURRENT_INFER` (default `1` = tanpa scan paralel). Kesehatan
+sistem: `GET /api/health` (butuh login). Deploy produksi: `python run.py --prod`
+(waitress) di belakang reverse proxy. Catatan: backend OCR (`SGS_OCR_BACKEND`)
+& varian YOLO dibaca saat aplikasi start — ganti env butuh restart.
+
+Performa di laptop uji (Dell Inspiron 5570, i5-8250U, CPU saja): scan cepat
+±1,4 detik, scan penuh 3 frame ±5 detik, CPU saat scan ±53% — detail di
+[docs/LAPORAN_KP_TEMUAN.md](docs/LAPORAN_KP_TEMUAN.md). Halaman `/camera`
+menyediakan pemilih perangkat kamera untuk presentasi 1 webcam.
 
 ## Model Detektor (3 varian, bisa dipilih saat runtime)
 
@@ -81,7 +87,27 @@ cd "Tugas Citra Digital/prototype"
 python tests\test_pipeline.py
 ```
 
-Suite assert tanpa framework (97 pemeriksaan): aturan NRKB, fusi, voting,
+Suite assert tanpa framework (102 pemeriksaan): aturan NRKB, fusi, voting,
 moiré monitor, distraktor layar/video, rantai kepercayaan QR, dan identitas
 audit. `pytest` tidak diperlukan. Pemeriksaan bobot YOLO di-skip (bukan gagal)
 bila `runs/detect/` belum diisi `tools/fetch_weights.py`.
+
+---
+
+## Referensi
+
+- Harani, N. H., Prianto, C., dan Hasanah, M. (2019). *Deteksi Objek dan
+  Pengenalan Karakter Plat Nomor Kendaraan Indonesia Menggunakan Metode
+  Convolutional Neural Network (CNN) Berbasis Python*. Jurnal Teknik Informatika,
+  Vol. 11, No. 3. [PDF](docs/artc/658-Article%20Text-963-1-10-20200213.pdf)
+- Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor
+  Kendaraan Menggunakan Algoritma Convolutional Neural Network Berbasis
+  Tensorflow*. Remik: Riset dan E-Jurnal Manajemen Informatika Komputer, Vol. 9,
+  No. 3. DOI: [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169).
+  [PDF](docs/artc/15169-Article%20Text-24310-1-10-20250811.pdf)
+- Forum Komunitas Axelera AI, [*Home Assistant CCTV Object and Motion Detection
+  Using Metis*](https://community.axelera.ai/the-axelera-forum-52/home-assistant-cctv-object-and-motion-detection-using-metis-1226) ·
+  [`axelera-ai-hub/voyager-sdk`](https://github.com/axelera-ai-hub/voyager-sdk) ·
+  [`graffitiwriter/Metis-for-Home-Assistant-Motion-Detection`](https://github.com/graffitiwriter/Metis-for-Home-Assistant-Motion-Detection)
+  — referensi NPU (Axelera Metis), zona deteksi, dan cascaded pipeline LPR
+  untuk pengembangan lanjutan.

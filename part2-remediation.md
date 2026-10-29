@@ -3,6 +3,14 @@
 
 # Part 2 — Remediation Instructions (Step by Step)
 
+> **Status 29 Oktober 2026:** Step 0 (prasyarat runnability) dan Step 1
+> (autentikasi) selesai — test suite **102/102 lulus**, bobot tersedia via
+> `tools/fetch_weights.py` / Git LFS, login sesi + CSRF aktif. C2 (identitas
+> audit dari sesi server) dan C3 (escape output ke innerHTML) juga sudah
+> ditangani. Optimasi performa tambahan (batas thread CPU + jalur cepat OCR
+> recognizer) berada di luar daftar langkah ini — lihat
+> `docs/LAPORAN_KP_TEMUAN.md`.
+
 > These are concrete, ordered instructions to turn the prototype into something
 > that can safely sit in front of a real gate. Each step lists the issue IDs it
 > resolves (C1…L6 from Part 1), the files to touch, and reference code.

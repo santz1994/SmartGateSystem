@@ -16,8 +16,9 @@ rawan salah catat, dan tidak ada jejak audit.
 mencocokkannya dengan database kendaraan, lalu membuka gerbang otomatis —
 dengan satpam tetap memegang kendali penuh.
 
-**Hasil:** Akurasi deteksi Test mAP50 **94,91%**, rata-rata waktu proses
-**98 ms per frame**, dan seluruh keputusan tercatat dalam log audit.
+**Hasil:** Akurasi deteksi Test mAP50 **96,83%** (YOLOv11n), waktu deteksi
+**±100 ms per frame**, satu scan penuh plat **±1,4 detik**, dan seluruh
+keputusan tercatat dalam log audit.
 
 **Prinsip utama:** *sistem tidak pernah membuka gerbang bila ragu* (fail-safe).
 
@@ -111,6 +112,8 @@ cocok** gerbang membuka sendiri. Selain itu, satpam yang memutuskan.
 | **Early stopping** (`patience` + callback target 98%) | Training berhenti saat cukup — hemat GPU |
 | Cache hasil baca per frame sama | Auto scan tidak mengulang OCR |
 | Retry berat hanya saat gagal | Jalur normal tetap cepat |
+| Batas thread inferensi + `OMP_WAIT_POLICY=PASSIVE` | CPU saat scan 90% → ±53% |
+| OCR jalur cepat: recognizer tanpa deteksi teks | 2,9 dtk → 0,45 dtk per pembacaan |
 
 ---
 
@@ -118,10 +121,10 @@ cocok** gerbang membuka sendiri. Selain itu, satpam yang memutuskan.
 
 | Metrik | Nilai |
 | --- | ---: |
-| Validation mAP50 | 89,38% |
-| **Test mAP50** | **94,91%** |
-| Latency rata-rata / P95 | 98,22 ms / 176,99 ms |
-| Format plat terbaca benar | 73,95% (88/119) |
+| Validation mAP50 | 93,61% |
+| **Test mAP50** | **96,83%** |
+| Latency rata-rata / P95 | 99,63 ms / 192,41 ms |
+| Format plat terbaca benar | 75,00% (87/116) |
 
 **Target 98% belum tercapai — dan itu disampaikan apa adanya.** Pelatihan
 berhenti wajar di epoch 50 tanpa overfitting ekstrem; menambah epoch tidak akan
@@ -169,8 +172,10 @@ diagnosis — jadi kasus tersebut jadi bahan perbaikan model, bukan kegagalan
 diam-diam.
 
 **Q: Berapa biaya komputasinya?**
-Jalan di PC standar (tanpa GPU khusus): rata-rata 98 ms per frame. Seluruh
-optimasi (crop-only CLAHE, frame skipping, ONNX) hadir agar target ini tercapai.
+Jalan di PC standar (tanpa GPU khusus): deteksi ±100 ms per frame, satu scan
+plat penuh (YOLO + OCR) ±1,4 detik. Optimasi crop-only CLAHE, frame skipping,
+pembatasan thread CPU, dan jalur cepat OCR (recognizer tanpa deteksi teks)
+menjaga scan tetap di bawah 2 detik.
 
 **Q: Kenapa YOLOv11n, bukan yang paling besar (v8x)?**
 Kami membandingkan tiga arsitektur pada dataset dan konfigurasi yang sama:
@@ -204,3 +209,20 @@ Di luar lingkup prototipe saat ini — kode dan materinya sudah disiapkan:
 Smart Gate System membuktikan bahwa pengenalan plat nomor yang **cepat, akurat,
 dan aman** bisa dibangun dengan hardware seadanya: AI mengerjakan pekerjaan
 berulang, satpam memegang keputusan penting, dan setiap tindakan tercatat.
+
+---
+
+## 11. Referensi
+
+- Harani, N. H., Prianto, C., dan Hasanah, M. (2019). *Deteksi Objek dan
+  Pengenalan Karakter Plat Nomor Kendaraan Indonesia Menggunakan Metode CNN
+  Berbasis Python*. Jurnal Teknik Informatika, Vol. 11, No. 3.
+  [PDF](artc/658-Article%20Text-963-1-10-20200213.pdf)
+- Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor
+  Kendaraan Menggunakan Algoritma CNN Berbasis Tensorflow*. Remik, Vol. 9,
+  No. 3. DOI: [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169).
+  [PDF](artc/15169-Article%20Text-24310-1-10-20250811.pdf)
+- Forum Komunitas Axelera AI, [*Home Assistant CCTV Object and Motion Detection
+  Using Metis*](https://community.axelera.ai/the-axelera-forum-52/home-assistant-cctv-object-and-motion-detection-using-metis-1226) ·
+  [`axelera-ai-hub/voyager-sdk`](https://github.com/axelera-ai-hub/voyager-sdk) —
+  referensi NPU untuk pengembangan lanjutan (target < 1 detik per kendaraan).

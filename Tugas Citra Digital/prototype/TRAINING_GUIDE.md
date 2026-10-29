@@ -173,8 +173,9 @@ Kesimpulan:
    Deteksi Aktif** (metrik tiap model tampil di pilihan).
 
 Run **V5 `smartgate-colab-v5`** (Colab, YOLOv8n, 50 epoch, dataset gabungan
-Roboflow + Kaggle COCO + background dengan anti-leakage) adalah run aktif saat
-ini. Ringkasan lengkap ada di `runs/detect/smartgate-colab-v5/evaluation_summary.json`:
+Roboflow + Kaggle COCO + background dengan anti-leakage) adalah baseline
+historis — run aktif kini **v6** (`smartgate-colab-v6-*`, lihat tabel di atas).
+Ringkasan lengkap ada di `runs/detect/smartgate-colab-v5/evaluation_summary.json`:
 
 | Metrik | Nilai |
 | --- | ---: |
@@ -193,7 +194,7 @@ Run lama yang masih tersimpan (baseline historis, jangan dipakai untuk klaim):
 Artefak training:
 
 ```text
-runs/detect/smartgate-colab-v5/      # run aktif (V5)
+runs/detect/smartgate-colab-v5/      # run lama (V5, baseline)
 ├── results.csv
 ├── evaluation_summary.json
 ├── confusion_matrix.png
@@ -229,13 +230,15 @@ OCR: mAP tidak berarti teks plat pasti terbaca benar.
 ## 5. Memakai Bobot di Prototype
 
 ```powershell
-$env:SGS_YOLO_WEIGHTS = "D:\Project\Smart Gate System\Tugas Citra Digital\prototype\runs\detect\smartgate-colab-v5\weights\best.pt"
+$env:SGS_YOLO_WEIGHTS = "D:\Project\Smart Gate System\Tugas Citra Digital\prototype\runs\detect\smartgate-colab-v6-yolo11n\weights\best.pt"
 python run.py
 ```
 
-Jika `SGS_YOLO_WEIGHTS` tidak diisi, prototype otomatis memakai bobot terbaru
-dengan urutan `runs/detect/smartgate-colab-v5`, lalu `runs/detect/runs/detect/smartgate`,
-lalu `smartgate-full`. Hasil YOLO tetap melewati
+Jika `SGS_YOLO_WEIGHTS` tidak diisi, prototype memakai bobot varian aktif dari
+`runs/detect/smartgate-colab-v6-<varian>/weights/best.pt` (varian dipilih di
+**/training**, default `yolov8n`, rekomendasi `yolo11n`); run lama
+(`smartgate-colab-v5`, `smartgate`, `smartgate-full`) hanya dipakai sebagai
+fallback bila bobot v6 belum ada. Hasil YOLO tetap melewati
 gerbang confidence, rasio plat, tekstur, dan jumlah glyph; kotak yang hanya
 menyerupai gril/emblem tidak diteruskan ke OCR.
 
@@ -312,3 +315,8 @@ Untuk deployment:
 - [ ] ROI dan ukuran minimum dikalibrasi untuk kamera gate.
 - [ ] Gagal OCR menghasilkan alert satpam, bukan auto-open.
 - [ ] Snapshot dan keputusan tersimpan di audit log.
+
+## 9. Referensi
+
+- Harani, N. H., Prianto, C., dan Hasanah, M. (2019). *Deteksi Objek dan Pengenalan Karakter Plat Nomor Kendaraan Indonesia Menggunakan Metode CNN Berbasis Python*. Jurnal Teknik Informatika Vol. 11 No. 3. [PDF](../../docs/artc/658-Article%20Text-963-1-10-20200213.pdf)
+- Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor Kendaraan Menggunakan Algoritma CNN Berbasis Tensorflow*. Remik Vol. 9 No. 3. DOI [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169). [PDF](../../docs/artc/15169-Article%20Text-24310-1-10-20250811.pdf)

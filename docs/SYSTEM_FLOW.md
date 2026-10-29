@@ -240,3 +240,15 @@ Pada prototype Flask saat ini (`Tugas Citra Digital/prototype/`):
 - **Ketahanan moiré layar** — median blur 3×3 pada enhancement crop, retry
   berbasis keyakinan (< 0,80), dan margin crop OCR dijaga (`pad_crop`) agar
   tepi huruf tidak terpotong.
+- **Optimasi CPU (29 Okt 2026)** — batas thread inferensi
+  (`OMP_WAIT_POLICY=PASSIVE`, `SGS_CPU_THREADS`) + jalur cepat OCR recognizer
+  tanpa deteksi teks: scan cepat ±1,4 detik (dulu ±4,5) dengan CPU ±53%
+  (dulu ~90%). Detail pengukuran: [LAPORAN_KP_TEMUAN.md](LAPORAN_KP_TEMUAN.md).
+
+---
+
+## 11. Referensi
+
+- Harani, N. H., Prianto, C., dan Hasanah, M. (2019). *Deteksi Objek dan Pengenalan Karakter Plat Nomor Kendaraan Indonesia Menggunakan Metode CNN Berbasis Python*. Jurnal Teknik Informatika Vol. 11 No. 3. [PDF](artc/658-Article%20Text-963-1-10-20200213.pdf)
+- Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor Kendaraan Menggunakan Algoritma CNN Berbasis Tensorflow*. Remik Vol. 9 No. 3. DOI [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169). [PDF](artc/15169-Article%20Text-24310-1-10-20250811.pdf)
+- [Axelera AI — Home Assistant CCTV Object and Motion Detection Using Metis](https://community.axelera.ai/the-axelera-forum-52/home-assistant-cctv-object-and-motion-detection-using-metis-1226) · [`axelera-ai-hub/voyager-sdk`](https://github.com/axelera-ai-hub/voyager-sdk) — referensi NPU & cascaded pipeline LPR.

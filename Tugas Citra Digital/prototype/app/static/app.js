@@ -273,14 +273,42 @@ if (camVideo) {
     }
   }
 
+  // Pemilih kamera: laptop sering punya webcam bawaan + webcam eksternal
+  // (mis. Logitech C920 untuk demo) — tanpa pilihan ini browser bisa memakai
+  // kamera yang salah. Label perangkat baru muncul setelah izin kamera diberikan.
+  const camDevice = $('#cam-device');
+  async function fillCamDevices() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    const cams = (await navigator.mediaDevices.enumerateDevices())
+      .filter((device) => device.kind === 'videoinput');
+    const picked = camDevice.value;
+    camDevice.textContent = '';
+    const auto = document.createElement('option');
+    auto.value = '';
+    auto.textContent = 'Otomatis';
+    camDevice.append(auto);
+    cams.forEach((cam, index) => {
+      const option = document.createElement('option');
+      option.value = cam.deviceId;
+      option.textContent = cam.label || `Kamera ${index + 1}`;
+      camDevice.append(option);
+    });
+    camDevice.value = picked;
+  }
+  fillCamDevices();
+
   $('#cam-start').addEventListener('click', async () => {
     try {
+      const deviceId = camDevice.value;
       stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 } },
+        video: deviceId
+          ? { deviceId: { exact: deviceId }, width: { ideal: 1280 } }
+          : { facingMode: 'environment', width: { ideal: 1280 } },
         audio: false,
       });
       camVideo.srcObject = stream;
       statusEl.textContent = 'Kamera aktif.';
+      fillCamDevices();
       if ($('#cam-auto').checked) scheduleNext(true);
     } catch (err) {
       statusEl.textContent = `Kamera gagal: ${err.message}`;

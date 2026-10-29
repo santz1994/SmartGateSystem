@@ -30,6 +30,9 @@ PLATE_ASPECT_IDEAL = 3.0  # fallback skor bila tahap OCR dimatikan
 def _cv2():
     import cv2
 
+    # Crop kecil yang diproses di sini tidak diuntungkan pool thread besar —
+    # batasi agar OpenCV tidak berebut CPU dengan PaddleOCR/PyTorch.
+    cv2.setNumThreads(config.CPU_THREADS)
     return cv2
 
 

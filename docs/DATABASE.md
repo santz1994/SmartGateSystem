@@ -327,3 +327,10 @@ DELETE FROM gate_logs        WHERE created_at  < now() - INTERVAL '365 days';
 - `gate_logs.vehicle_id` sengaja `NULLABLE`; `NULL` berarti **kendaraan tidak dikenal** dan pasangan yang sah adalah `match_result = 'NO_MATCH'`.
 - Normalisasi `plat_nomor` dilakukan di aplikasi: uppercase, hapus spasi/tanda hubung — sebelum `INSERT` maupun `SELECT`.
 - `session_id` disimpan sebagai `VARCHAR(64)` (bukan UUID khusus) agar AI worker bebas memakai format apa pun asalkan unik per kendaraan-lewat.
+
+---
+
+## 8. Referensi
+
+- Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor Kendaraan Menggunakan Algoritma CNN Berbasis Tensorflow*. Remik Vol. 9 No. 3. DOI [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169). [PDF](artc/15169-Article%20Text-24310-1-10-20250811.pdf)
+- Harani, N. H., Prianto, C., dan Hasanah, M. (2019). *Deteksi Objek dan Pengenalan Karakter Plat Nomor Kendaraan Indonesia Menggunakan Metode CNN Berbasis Python*. Jurnal Teknik Informatika Vol. 11 No. 3. [PDF](artc/658-Article%20Text-963-1-10-20200213.pdf)

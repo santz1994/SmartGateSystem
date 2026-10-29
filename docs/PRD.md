@@ -176,3 +176,9 @@ Setiap `gate_logs` **wajib** menyimpan:
 | [SYSTEM_FLOW.md](SYSTEM_FLOW.md) | Diagram alur, *state machine*, tabel keputusan, urutan waktu |
 | [API.md](API.md) | Spesifikasi lengkap endpoint, payload, response, WebSocket |
 | [TECHNICAL.md](TECHNICAL.md) | Arsitektur, stack, deployment, model AI, keamanan, pengujian |
+
+**Jurnal & referensi eksternal:**
+
+- Harani, N. H., Prianto, C., dan Hasanah, M. (2019). *Deteksi Objek dan Pengenalan Karakter Plat Nomor Kendaraan Indonesia Menggunakan Metode CNN Berbasis Python*. Jurnal Teknik Informatika Vol. 11 No. 3. [PDF](artc/658-Article%20Text-963-1-10-20200213.pdf)
+- Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor Kendaraan Menggunakan Algoritma CNN Berbasis Tensorflow*. Remik Vol. 9 No. 3. DOI [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169). [PDF](artc/15169-Article%20Text-24310-1-10-20250811.pdf)
+- [Axelera AI — Home Assistant CCTV Object and Motion Detection Using Metis](https://community.axelera.ai/the-axelera-forum-52/home-assistant-cctv-object-and-motion-detection-using-metis-1226) · [`axelera-ai-hub/voyager-sdk`](https://github.com/axelera-ai-hub/voyager-sdk) — referensi NPU (Axelera Metis) & cascaded pipeline LPR untuk pengembangan lanjutan.

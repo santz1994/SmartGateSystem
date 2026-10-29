@@ -22,6 +22,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from . import config
 from . import vehicles
 from .pipeline import (
     Detection,
@@ -142,6 +143,9 @@ def _model() -> Any | None:
         return None
     try:
         from ultralytics import YOLO
+        import torch
+
+        torch.set_num_threads(config.CPU_THREADS)
     except ImportError:
         return None
     return YOLO(str(path))

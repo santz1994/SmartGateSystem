@@ -1,5 +1,16 @@
 # SmartGateSystem — Full Audit Report
 
+> **Status 29 Oktober 2026.** Sebagian besar temuan sudah ditangani — lihat
+> `part2-remediation.md`: runnability **H3** (test suite **102/102 lulus**,
+> bobot via Git LFS + `tools/fetch_weights.py`, `ultralytics` terpasang),
+> **C1** (login sesi + role admin/satpam + proteksi CSRF), **C2** (identitas
+> audit dari sesi server, bukan body request), **C3** (escape `esc()` untuk
+> semua output OCR/QR ke innerHTML), **H2** (stiker legacy ditolak saat
+> `SGS_REQUIRE_SIGNED_STICKER=1`, default aktif). Optimasi performa CPU/OCR
+> (scan cepat ±1,4 detik, CPU ±53%) dicatat di `docs/LAPORAN_KP_TEMUAN.md`.
+> Skor runnability 5/10 di bawah berlaku saat audit berlangsung, bukan kondisi
+> kini.
+
 - **Repository**: https://github.com/santz1994/SmartGateSystem.git
 - **Scope**: `Tugas Citra Digital/prototype/` (the Flask prototype = "the app") — all backend, frontend, tests, tooling scripts, and repository structure
 - **Audit date**: 2026-10-21

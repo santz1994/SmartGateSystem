@@ -9,9 +9,21 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+# --- Batas thread CPU (dipasang SEBELUM paddle/torch/cv2 termuat) -------------
+# PaddlePaddle, PyTorch, dan OpenCV masing-masing membuka pool thread sendiri
+# (bawaan ~10 thread pada CPU 4-core) sehingga saling berebut CPU: pemindaian
+# justru lambat dan mesin terus di 90-100%. Setengah core logis≈ core fisik —
+# cukup untuk model kecil. OMP_WAIT_POLICY=PASSIVE agar thread tidur saat idle,
+# bukan memutar CPU. Override: env SGS_CPU_THREADS.
+CPU_THREADS = int(os.getenv("SGS_CPU_THREADS", str(max(1, (os.cpu_count() or 4) // 2))))
+os.environ.setdefault("OMP_NUM_THREADS", str(CPU_THREADS))
+os.environ.setdefault("MKL_NUM_THREADS", str(CPU_THREADS))
+os.environ.setdefault("OPENBLAS_NUM_THREADS", str(CPU_THREADS))
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 # Versi statis untuk cache-busting app.js/style.css (L5).
-APP_VERSION = "2026.10.22b"
+APP_VERSION = "2026.10.29"
 DATA_DIR = Path(os.getenv("SGS_DATA_DIR", BASE_DIR / "data"))
 SNAPSHOT_DIR = DATA_DIR / "snapshots"
 DIAGNOSTIC_DIR = DATA_DIR / "diag" / "ocr_failed"

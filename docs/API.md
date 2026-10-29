@@ -455,3 +455,11 @@ curl -X POST http://gate-backend.local:8000/api/v1/gate/3f8c1e42/override \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"note":"Kendaraan tamu, sudah verifikasi KTP di pos. Aman."}'
 ```
+
+---
+
+## 12. Referensi
+
+- Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor Kendaraan Menggunakan Algoritma CNN Berbasis Tensorflow*. Remik Vol. 9 No. 3. DOI [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169). [PDF](artc/15169-Article%20Text-24310-1-10-20250811.pdf)
+- Harani, N. H., Prianto, C., dan Hasanah, M. (2019). *Deteksi Objek dan Pengenalan Karakter Plat Nomor Kendaraan Indonesia Menggunakan Metode CNN Berbasis Python*. Jurnal Teknik Informatika Vol. 11 No. 3. [PDF](artc/658-Article%20Text-963-1-10-20200213.pdf)
+- [`axelera-ai-hub/voyager-sdk`](https://github.com/axelera-ai-hub/voyager-sdk) — referensi integrasi inference worker (NPU) ke backend.

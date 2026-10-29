@@ -281,7 +281,7 @@ hasil sebelum diuji pada dataset terpisah.
 Uji manual yang sudah dicakup meliputi normalisasi NRKB, pemilihan kandidat
 terdekat, ROI, voting OCR, retry enhancement, fusi, dan alur end-to-end.
 Regresi otomatis terkunci di `tests/test_pipeline.py` (assert tanpa framework,
-80+ pemeriksaan): aturan NRKB, voting, moiré monitor (`test_monitor_moire`),
+102 pemeriksaan): aturan NRKB, voting, moiré monitor (`test_monitor_moire`),
 dan distraktor layar/video (`test_distractors`).
 Kasus seperti `L1257PR` berhasil dibantu penyempitan pita teks dan voting.
 Kasus pantulan layar seperti `AA5045YN` masih tidak stabil karena detektor
@@ -320,6 +320,8 @@ tidak terdaftar.
 
 1. Ramadhani, A. D., Amami, A. F., Lesmono, A. N., Pramulen, A. S., Nadziroh, F., dan Segara, A. J. T. (2026). *Analisis Akurasi Pembacaan Karakter Plat Nomor Kendaraan Indonesia Menggunakan YOLOv8 dan EASYOCR*. **Jurnal Teknika**, 18(2), 147–154. DOI: 10.30736/jt.v18i2.1604. — Temuan: YOLOv8x unggul mAP@0.5 (0,951) tetapi YOLOv8n menghasilkan pembacaan OCR lebih stabil (bbox lebih lebar); akurasi deteksi ≠ akurasi OCR.
 2. Nurjannah, E., Rahman, S. S., Awalia, R., Andini, H., dan Zahra, N. A. (2025). *Deteksi Plat Motor Dengan Mudah Menggunakan EasyOCR Dalam Pengolahan Citra Digital*. **Politeknik Bosowa**, 7(2). P-ISSN 2685-4868. — Pemanfaatan EasyOCR untuk deteksi teks plat motor, akurasi rata-rata 97,0% (10 sampel).
+3. Harani, N. H., Prianto, C., dan Hasanah, M. (2019). *Deteksi Objek dan Pengenalan Karakter Plat Nomor Kendaraan Indonesia Menggunakan Metode Convolutional Neural Network (CNN) Berbasis Python*. **Jurnal Teknik Informatika**, 11(3). — CNN efektif untuk klasifikasi karakter plat (37 class huruf+angka); deteksi posisi kendaraan memakai Faster R-CNN. [PDF](../docs/artc/658-Article%20Text-963-1-10-20200213.pdf)
+4. Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor Kendaraan Menggunakan Algoritma Convolutional Neural Network Berbasis Tensorflow*. **Remik**, 9(3). DOI: [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169). — ANPR dengan CNN LeNet-5, akurasi 89,86% (50 citra); usulan klasifikasi per blok (huruf awal / angka / huruf akhir) sejalan dengan aturan NRKB pada sistem ini. [PDF](../docs/artc/15169-Article%20Text-24310-1-10-20250811.pdf)
 
 1. Ultralytics, dokumentasi YOLO.
 2. PaddleOCR, dokumentasi dan model recognizer (EasyOCR tetap didukung sebagai opsi).
