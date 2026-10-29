@@ -23,7 +23,7 @@ os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 # Versi statis untuk cache-busting app.js/style.css (L5).
-APP_VERSION = "2026.10.29"
+APP_VERSION = "2026.10.29b"
 DATA_DIR = Path(os.getenv("SGS_DATA_DIR", BASE_DIR / "data"))
 SNAPSHOT_DIR = DATA_DIR / "snapshots"
 DIAGNOSTIC_DIR = DATA_DIR / "diag" / "ocr_failed"

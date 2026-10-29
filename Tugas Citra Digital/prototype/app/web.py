@@ -82,7 +82,11 @@ def create_app() -> Flask:
 
     import threading
 
-    threading.Thread(target=ocr.warmup, daemon=True).start()  # model siap sebelum scan pertama
+    def _warmup_models() -> None:
+        ocr.warmup()
+        detect_yolo.available()  # YOLO hangat di awal — scan pertama tidak lambat
+
+    threading.Thread(target=_warmup_models, daemon=True).start()  # model siap sebelum scan pertama
 
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = config.MAX_UPLOAD_MB * 1024 * 1024

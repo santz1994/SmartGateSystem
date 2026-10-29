@@ -705,6 +705,94 @@ def detect_plates(image: Any, max_candidates: int = 12) -> list[Detection]:
     return translate_detections(detections, offset)
 
 
+def frame_text_candidate(image: Any) -> Detection | None:
+    """Sapuan pita teks cadangan saat detektor tidak menemukan kotak plat.
+
+    Foto cetak/layar (halftone, moiré) dapat membuat YOLO kosong dan detektor
+    klasik hanya menghasilkan fragmen, padahal baris teks plat terlihat jelas.
+    Cari baris dengan profil ink horizontal, ukur jumlah glyph, jadikan satu
+    kandidat. Hasilnya tetap melewati gerbang NRKB saat dibaca — subtitle /
+    papan nama ditolak di lapisan baca, bukan di sini.
+    """
+    cv2, np = _cv2(), _np()
+    h_frame, w_frame = image.shape[:2]
+    gate_roi = config.DETECTION_ROI if w_frame / max(h_frame, 1) >= 1.3 else None
+    roi, (ox, oy) = detection_roi(image, gate_roi)
+    gray = cv2.cvtColor(cv2.GaussianBlur(roi, (5, 5), 0), cv2.COLOR_BGR2GRAY)
+    height, width = gray.shape
+
+    best: tuple[tuple[int, int], tuple[int, int, int, int]] | None = None
+    # Deteksi berbasis komponen mirip huruf, bukan profil baris: tekstur cetak
+    # halftone membanjiri profil baris (seluruh frame jadi satu "pita"), tetapi
+    # titik tekstur tersaring OPEN + filter ukuran/segi-bentuk glyph. Dua
+    # polaritas untuk teks putih di plat gelap (motor) maupun sebaliknya (mobil).
+    for polarity in (1, -1):
+        if polarity > 0:
+            binary = ((gray >= int(np.percentile(gray, 92))) * 255).astype("uint8")
+        else:
+            binary = ((gray <= int(np.percentile(gray, 8))) * 255).astype("uint8")
+        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, np.ones((3, 3), "uint8"))
+        count, _, stats, _ = cv2.connectedComponentsWithStats(binary, 8)
+        glyphs: list[tuple[int, int, int, int]] = []
+        for index in range(1, count):
+            x, y, w, h, area = (int(value) for value in stats[index])
+            if not (8 <= h <= height * 0.15 and 3 <= w <= width * 0.08):
+                continue
+            if not 0.15 <= w / max(h, 1) <= 1.4:
+                continue
+            if area < 0.25 * w * h:
+                continue
+            glyphs.append((x, y, w, h))
+        if len(glyphs) < 4:
+            continue
+        glyphs.sort(key=lambda g: (g[1] + g[3] / 2, g[0]))
+        rows: list[list[tuple[int, int, int, int]]] = []
+        for glyph in glyphs:
+            cy = glyph[1] + glyph[3] / 2
+            for row in rows:
+                row_cy = sum(g[1] + g[3] / 2 for g in row) / len(row)
+                row_h = sum(g[3] for g in row) / len(row)
+                # Toleransi dari tinggi glyph sendiri: baris plat yang sedikit
+                # miring punya sebaran cy besar — toleransi kecil justru membuatnya
+                # terpecah jadi beberapa "baris" kecil.
+                if abs(cy - row_cy) <= 0.7 * max(glyph[3], row_h, 1):
+                    row.append(glyph)
+                    break
+            else:
+                rows.append([glyph])
+        for row in rows:
+            heights = sorted(g[3] for g in row)
+            row_h = heights[len(heights) // 2]
+            uniform = [g for g in row if 0.65 * row_h <= g[3] <= 1.5 * row_h]
+            if len(uniform) < 4:
+                continue
+            x1, y1 = min(g[0] for g in uniform), min(g[1] for g in uniform)
+            x2, y2 = max(g[0] + g[2] for g in uniform), max(g[1] + g[3] for g in uniform)
+            w, h = x2 - x1, y2 - y1
+            if w < 40 or not 1.2 <= w / max(h, 1) <= 8.0:
+                continue
+            score = (len(uniform), w * h)
+            if best is None or score > best[0]:
+                best = (score, (x1, y1, x2, y2))
+    if best is None:
+        return None
+
+    x1, y1, x2, y2 = best[1]
+    pad_x, pad_y = int((x2 - x1) * 0.04), max(int((y2 - y1) * 0.35), 8)
+    x1, y1 = max(x1 - pad_x, 0), max(y1 - pad_y, 0)
+    x2, y2 = min(x2 + pad_x, width), min(y2 + pad_y, height)
+    crop = pad_crop(roi[y1:y2, x1:x2])  # margin tepi agar glyph tidak terpotong OCR
+    quad = [
+        [float(x1 + ox), float(y1 + oy)],
+        [float(x2 + ox), float(y1 + oy)],
+        [float(x2 + ox), float(y2 + oy)],
+        [float(x1 + ox), float(y2 + oy)],
+    ]
+    return Detection(
+        kind="plate", quad=quad, confidence=0.5, crop=crop,
+        meta={"raw_crop": crop, "rescue": True},
+    )
+
 def _merge_fragments(candidates: list[tuple[float, Any]]) -> list[tuple[float, Any]]:
     """Gabung fragmen teks plat yang berjajar jadi satu kandidat penuh.
 

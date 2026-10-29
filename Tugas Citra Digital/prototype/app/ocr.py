@@ -389,6 +389,15 @@ def _read_paddle_rec_only(crop: Any) -> tuple[str, float]:
     confidence = sum(scores) / len(scores) if scores else 0.0
     return best_plate_text(texts), round(confidence, 4)
 
+def _reads_agree(a: str, b: str) -> bool:
+    """Dua bacaan zoom dianggap sepakat bila sama, saling mengandung, atau
+    berbeda satu karakter — blur tepi crop sering menukar/memotong satu glyph."""
+    if not a or not b:
+        return False
+    if a == b or a in b or b in a:
+        return True
+    return len(a) == len(b) and sum(x != y for x, y in zip(a, b)) <= 1
+
 def _read_paddle(crop: Any) -> tuple[str, float]:
     # Jalur cepat: recognizer tanpa deteksi teks. Crop sudah pita teks plat —
     # model deteksi justru memakan ~2,5 dari ~2,9 dtk per pembacaan di CPU uji.
@@ -397,7 +406,19 @@ def _read_paddle(crop: Any) -> tuple[str, float]:
     try:
         text, confidence = _read_paddle_rec_only(crop)
         if _looks_like_plate(text) and confidence >= 0.5:
-            return text, confidence
+            if confidence >= 0.95:
+                return text, confidence
+            # Keyakinan sedang: cross-check zoom 2x. Bacaan salah yang
+            # "percaya diri" (blur/kecil, mis. H3239OK untuk plat H 3253 CK)
+            # hampir tidak pernah konsisten saat diperbesar — yang tidak
+            # sepakat jatuh ke pipeline det+rec penuh di bawah.
+            cv2 = _cv2()
+            zoom = cv2.resize(crop, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+            text2, confidence2 = _read_paddle_rec_only(zoom)
+            if _reads_agree(text, text2):
+                if len(text2) > len(text):
+                    text, confidence = text2, confidence2
+                return text, round((confidence + confidence2) / 2, 4)
     except Exception:  # noqa: BLE001 — jalur cepat opsional, gagal = pakai jalur penuh
         pass
     reader = _paddle_reader()
@@ -621,13 +642,15 @@ def read_plate_robust(
 
     best = ("", 0.0, "")
     best_score = (-1, -1, -1, -1.0)
+    attempts = 0
 
     def attempt(variant: Any) -> bool:
         """Satu kali baca. True bila hasil sudah layak dan usaha boleh berhenti."""
-        nonlocal best, best_score
+        nonlocal best, best_score, attempts
         if getattr(variant, "size", 0) == 0:
             return False
-        text, confidence, backend = read_plate(variant)
+        attempts += 1
+        text, confidence, backend = read_plate(variant, fast=fast)
         valid = 1 if _looks_like_plate(text) else 0
         fits = 1 if number_fits_class(text, vehicle_class) else 0
         # Panjang mendahului keyakinan: 'A8X' conf 1.0 tidak boleh mengalahkan
@@ -635,6 +658,10 @@ def read_plate_robust(
         score = (valid, fits, min(len(text), 9), confidence)
         if score > best_score:
             best_score, best = score, (text, confidence, backend)
+        # Mode cepat: batas 3 percobaan — frame buruk tidak perlu seluruh
+        # tangga retry; sisanya justru menahan auto scan berikutnya.
+        if fast and attempts >= 3:
+            return True
         # Berhenti awal hanya untuk hasil yang terlihat utuh: potongan pendek
         # seperti 'A8X'/'D226' sering hanya sebagian plat / sisa stiker.
         return bool(valid and confidence >= 0.80 and len(text) >= 5)
@@ -708,13 +735,15 @@ def warmup() -> None:
     except Exception:  # noqa: BLE001 - warmup gagal jangan menahan server
         pass
 
-def read_plate(crop: Any) -> tuple[str, float, str]:
+def read_plate(crop: Any, fast: bool = False) -> tuple[str, float, str]:
     """Baca plat dari crop yang sudah di-deskew. -> (teks, keyakinan, backend).
 
     Rantai fallback: backend utama (PaddleOCR) dulu — cepat dan akurat pada
     foto dataset. Bila hasilnya gagal format NRKB (kasus kamera langsung / moiré
     layar yang lebih dikuasai EasyOCR), backend kedua mencoba menyelamatkan.
-    Biaya tambahan hanya dibayar saat gagal.
+    Biaya tambahan hanya dibayar saat gagal. ``fast`` (auto scan) melewati
+    penyelamat backend kedua — PyTorch/EasyOCR 1-4 dtk per panggilan terlalu
+    mahal untuk preview; jalur penuh (scan-simpan-log) tetap memakainya.
     """
     first = ("", 0.0, "template_match")
     if active_backend() == "paddleocr":
@@ -733,7 +762,7 @@ def read_plate(crop: Any) -> tuple[str, float, str]:
         return first
 
     second_backend = "easyocr" if first[2] == "paddleocr" else "paddleocr"
-    if importlib_available(second_backend):
+    if not fast and importlib_available(second_backend):
         try:
             text, confidence = (
                 _read_easyocr(crop) if second_backend == "easyocr" else _read_paddle(crop)

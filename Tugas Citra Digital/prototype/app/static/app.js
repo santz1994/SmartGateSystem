@@ -64,6 +64,7 @@ function renderResult(data) {
       <thead><tr><th>Frame</th><th>Sumber</th><th>Plat</th><th>Conf</th><th>Stiker</th><th>Conf</th><th>Ketajaman</th><th></th></tr></thead>
       <tbody>${frames}</tbody>
     </table>
+    ${data.log_deduped ? '<p class="muted small">Plat sama baru saja dicatat — log tidak diduplikasi (1 kendaraan = 1 kejadian).</p>' : ''}
     ${data.log_id ? `<p><a class="btn" href="/logs/${esc(data.log_id)}">Lihat detail &amp; tahap pipeline</a></p>` : ''}
   `;
 }
@@ -223,7 +224,12 @@ if (camVideo) {
   let lastScanMs = 0;
 
   async function scan(persist) {
-    if (busy) return;
+    if (busy) {
+      if (persist) {
+        statusEl.textContent = 'Scan sedang berjalan — tunggu selesai, lalu ulangi.';
+      }
+      return;
+    }
     if (!stream || !camVideo.videoWidth) {
       if (persist) statusEl.textContent = 'Kamera belum siap — klik Aktifkan Kamera dulu.';
       // Video belum siap: jangan matikan loop auto scan, coba lagi interval berikut.

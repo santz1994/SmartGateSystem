@@ -70,6 +70,7 @@ class EvaluationResult:
     db_available: bool = True
     plate_enabled: bool = True
     sticker_enabled: bool = True
+    log_deduped: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -90,6 +91,7 @@ class EvaluationResult:
             "matched_booking": self.matched_booking,
             "snapshot_url": self.snapshot_url,
             "log_id": self.log_id,
+            "log_deduped": self.log_deduped,
             "ocr_backend": self.ocr_backend,
             "vehicle_class": self.vehicle_class,
             "vehicle_class_label": vehicles.label(self.vehicle_class),
@@ -158,6 +160,25 @@ MAX_SNAPSHOT_SESSIONS = 200
 # memperlambat (thread pool penuh) — antre lebih cepat daripada berbagi CPU.
 _INFERENCE_SLOTS = threading.Semaphore(int(os.getenv("SGS_MAX_CONCURRENT_INFER", "1")))
 
+# Debounce log: plat sama dalam jendela ini tidak dicatat ganda — satu
+# kendaraan = satu kejadian (sliding window: selama plat terus muncul, duplikat
+# terus ditahan). Override: env SGS_LOG_COOLDOWN_SECONDS.
+LOG_COOLDOWN_SECONDS = float(os.getenv("SGS_LOG_COOLDOWN_SECONDS", "60"))
+_recent_log_plates: dict[str, float] = {}
+
+def _plate_log_duplicate(plate_text: str | None) -> bool:
+    """Catat kemunculan plat; True bila plat sama sudah dicatat dalam cooldown."""
+    key = (plate_text or "").strip().upper()
+    if not key:
+        return False
+    now = time.monotonic()
+    for text, seen in list(_recent_log_plates.items()):
+        if now - seen > LOG_COOLDOWN_SECONDS:
+            del _recent_log_plates[text]
+    last = _recent_log_plates.get(key)
+    _recent_log_plates[key] = now
+    return last is not None and now - last <= LOG_COOLDOWN_SECONDS
+
 def _prune_snapshots() -> None:
     if not config.SNAPSHOT_DIR.is_dir():
         return
@@ -196,6 +217,12 @@ def _process_frame(
         # gerbang pemecah seri — blob teks/video besar tidak boleh mengambil
         # slot OCR dari plat asli.
         plates = sorted(plates, key=lambda d: pipeline.candidate_score(d, image.shape), reverse=True)[: (1 if fast else 3)]
+        # Kandidat penyelamat sapuan pita teks — foto cetak/layar (halftone,
+        # moiré) dapat membuat detektor kosong/fragmen. Ditaruh paling akhir:
+        # hanya dibaca bila kandidat sebelumnya tidak menghasilkan teks NRKB.
+        rescue = pipeline.frame_text_candidate(image)
+        if rescue is not None:
+            plates.append(rescue)
     stickers = pipeline.detect_stickers(image) if sticker_enabled and not fast else []
     # Blok warna jenuh di latar (video/layar) bukan stiker: buang yang gagal
     # terdekode agar kotak deteksi tidak "sibuk" menempel pada distraktor.
@@ -239,7 +266,7 @@ def _process_frame(
                 reading = (
                     ocr.read_plate_robust(view, vehicle_class, fast=fast)
                     if use_robust
-                    else ocr.read_plate(view)
+                    else ocr.read_plate(view, fast=fast)
                 )
                 readings.append((det, *reading))
                 if strong(reading):
@@ -262,10 +289,24 @@ def _process_frame(
                 max(x1 - pad_x, 0) : min(x2 + pad_x, image.shape[1]),
             ]
             for band in ocr.band_crops(wide, count=2):
-                reading = ocr.read_plate(band)
+                reading = ocr.read_plate(band, fast=fast)
                 readings.append((det, *reading))
                 if strong(reading):
                     break
+        # Kandidat penyelamat tidak membawa golongan dari deteksi — turunkan
+        # dari nomor hasil baca, agar tiebreak pool tidak kalah dari kandidat
+        # sampah yang kebetulan membawa meta golongan.
+        for det, text, *_ in readings:
+            if det.meta.get("rescue") and ocr._looks_like_plate(text):
+                number = ocr.number_group(text)
+                det.meta["vehicle_class"] = next(
+                    (
+                        key
+                        for low, high, key in ocr.NUMBER_GROUPS
+                        if number is not None and low <= number <= high
+                    ),
+                    None,
+                )
         valid_readings = [r for r in readings if ocr._looks_like_plate(r[1])]
         confident_readings = [r for r in valid_readings if r[2] >= 0.5]
         pool = confident_readings or valid_readings or [r for r in readings if r[1] and r[2] >= 0.5] or readings
@@ -406,6 +447,7 @@ def evaluate(
     # --- Simpan snapshot + log ---
     snapshot_url = None
     log_id = None
+    log_deduped = False
     if persist:
         for frame in frames:
             annotated = pipeline.annotate(
@@ -430,17 +472,21 @@ def evaluate(
                 ocr_backend=frame.ocr_backend,
                 vehicle_class=frame.vehicle_class,
             )
-        log_id = db.insert_gate_log(
-            session_id=session_id,
-            decision=decision,
-            plate_text=plate_text,
-            sticker_code=sticker_code,
-            fused_score=scores.fused_score,
-            matched_vehicle_id=match["id"] if match is not None else None,
-            matched_booking_id=booking["id"] if booking is not None else None,
-            snapshot_url=snapshot_url,
-            reason=reason,
-        )
+        if _plate_log_duplicate(plate_text):
+            # Plat sama baru saja dicatat — 1 kendaraan = 1 kejadian.
+            log_deduped = True
+        else:
+            log_id = db.insert_gate_log(
+                session_id=session_id,
+                decision=decision,
+                plate_text=plate_text,
+                sticker_code=sticker_code,
+                fused_score=scores.fused_score,
+                matched_vehicle_id=match["id"] if match is not None else None,
+                matched_booking_id=booking["id"] if booking is not None else None,
+                snapshot_url=snapshot_url,
+                reason=reason,
+            )
         _prune_snapshots()
 
     return EvaluationResult(
@@ -461,6 +507,7 @@ def evaluate(
         matched_booking=dict(booking) if booking is not None else None,
         snapshot_url=snapshot_url,
         log_id=log_id,
+        log_deduped=log_deduped,
         frames=frames,
         thresholds=thresholds,
         ocr_backend=next((f.ocr_backend for f in frames if f.ocr_backend), ocr.active_backend()),
