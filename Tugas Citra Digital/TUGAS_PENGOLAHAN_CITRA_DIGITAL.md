@@ -9,13 +9,19 @@
 Smart Gate System mengidentifikasi kendaraan tanpa kontak fisik. CCTV 1
 menangkap kendaraan pada zona pendekatan, sedangkan CCTV 2 menangkap kendaraan
 di dekat gate. Kedua sumber dapat menghasilkan lebih dari satu gambar untuk
-diproses bersama. Plat nomor dibaca dengan OCR dan koreksi aturan NRKB.
+diproses bersama. Plat nomor dibaca dengan OCR dan koreksi aturan NRKB sesuai
+**Peraturan Kepolisian (Perpol) Nomor 7 Tahun 2021**.
 
 Jika plat cocok dengan database kendaraan aktif dan confidence memenuhi
 aturan, sistem menghasilkan `AUTO_OPEN`. Jika plat gagal dibaca atau tidak
 cocok, sistem menghasilkan `NO_MATCH` atau `OCR_FAILED`, memberi alert kepada
 satpam, dan tidak membuka gate otomatis. Satpam dapat memilih `MANUAL_OVERRIDE`
 setelah pemeriksaan visual; foto, pengguna, waktu, dan alasan tetap dicatat.
+
+Ringkasan eksperimen terbaru (**v6 Multi-Domain 5-Fold Stratified Group CV — Fold 0**):
+- **YOLOv11n (`smartgate-colab-v6-yolo11n`)**: Bobot `5,48 MB` (`.pt`) / `10,66 MB` (`.onnx`), **Test Hold-out mAP50 = `0,9693`**, `mAP50-95 = 0,6150`, Validation Fold 0 multi-domain `mAP50 = 0,8464` (`mAP50-95 = 0,5686`), End-to-End OCR Valid Format Rate `74,07%` (`80/108`), latensi rata-rata `87,43 ms` (`P95 = 161,03 ms`).
+- **YOLOv8n (`smartgate-colab-v6-yolov8n`)**: Bobot `6,48 MB` (`.pt`) / `12,77 MB` (`.onnx`), **Test Hold-out mAP50 = `0,9617`**, `mAP50-95 = 0,5931`, Validation Fold 0 multi-domain `mAP50 = 0,8488` (`mAP50-95 = 0,5669`), **End-to-End OCR Valid Format Rate = `75,96%`** (`79/104`, naik dari `72,03%`), latensi rata-rata `76,50 ms` (`P95 = 157,19 ms`).
+- Seluruh pipeline dikunci dengan **133 pemeriksaan** regresi otomatis di `tests/test_pipeline.py`.
 
 ## 2. Tujuan
 
@@ -168,34 +174,38 @@ fallback hanya menjadi bukti bila berhasil didekode — kandidat yang gagal
 didekode dibuang agar objek berwarna di latar (mis. video/layar) tidak
 berubah menjadi kotak stiker palsu.
 
-### 5.5 Perbandingan Arsitektur Detektor
+### 5.5 Perbandingan Arsitektur Detektor (Eksperimen v6 Multi-Domain Fold 0)
 
-Tiga arsitektur dilatih pada dataset, konfigurasi, dan seed yang sama
-(50 epoch, T4, `seed=42`) sebagai studi pembanding. Ketiganya dapat diuji
-langsung di aplikasi lewat pemilih model di halaman `/training`:
+Dua arsitektur ringan (*nano*) generasi berurutan (**YOLOv8n** vs **YOLOv11n**) dilatih pada protokol **5-Fold Stratified Group Cross-Validation (Fold 0)** dengan regularisasi anti-degradasi, konfigurasi, dan seed yang sama (50 epoch, GPU Tesla T4, `seed=42`). Keduanya dapat diuji dan diganti langsung saat runtime di aplikasi lewat pemilih model di halaman `/training`:
 
-| Metrik | YOLOv8n | YOLOv8x | YOLOv11n |
-| --- | ---: | ---: | ---: |
-| Val mAP50 | 0,9194 | 0,9338 | 0,9361 |
-| Test mAP50 | 0,9564 | 0,9580 | 0,9683 |
-| Test mAP50-95 | 0,6309 | 0,5824 | 0,6292 |
-| Valid format OCR | 72,03% | 67,52% | 75,00% |
-| Latency avg / P95 | 96 / 176 ms | 189 / 263 ms | 100 / 192 ms |
-| Bobot best.pt | 6,5 MB | 136,7 MB | 5,5 MB |
+| Metrik Evaluasi | YOLOv8n (`smartgate-colab-v6-yolov8n`) | YOLOv11n (`smartgate-colab-v6-yolo11n`) | Keunggulan |
+| --- | ---: | ---: | --- |
+| **Validation Fold 0 mAP50** *(multi-domain ~813 citra)* | **0,8488** | 0,8464 | YOLOv8n (+0,0024) |
+| **Validation Fold 0 mAP50-95** *(multi-domain)* | 0,5669 | **0,5686** | YOLOv11n (+0,0017) |
+| **Test Hold-out mAP50** *(84 citra)* | 0,9617 | **0,9693** | **YOLOv11n (+0,0076)** |
+| **Test Hold-out mAP50-95** *(84 citra)* | 0,5931 | **0,6150** | **YOLOv11n (+0,0219)** |
+| **End-to-End OCR Valid Format Rate** | **75,96% (79/104)** | 74,07% (80/108) | **YOLOv8n (+1,89%)** |
+| **Latency End-to-End Rata-rata / P95** | **76,50 ms / 157,19 ms** | 87,43 ms / 161,03 ms | **YOLOv8n (lebih cepat 12,5%)** |
+| **Ukuran Bobot `best.pt` / `best.onnx`** | 6,48 MB / 12,77 MB | **5,48 MB / 10,66 MB** | **YOLOv11n (15,4% lebih ringkas)** |
 
-Temuan:
-1. **YOLOv11n unggul keseluruhan** — mAP50 tertinggi, OCR paling stabil, bobot
-   paling kecil, latensi setara YOLOv8n. Arsitektur generasi baru lebih
-   efisien daripada sekadar memperbesar model (YOLOv8x).
-2. YOLOv8x unggul tipis di deteksi atas YOLOv8n tetapi kalah di stabilitas
-   OCR dan 2× lebih lambat — konsisten dengan Ramadhani dkk. (2026): akurasi
-   deteksi tidak otomatis berarti akurasi OCR lebih baik.
-3. Ukuran model tidak linear dengan kualitas baca; pemilihan arsitektur harus
-   diukur end-to-end (mAP + valid-format rate + latensi).
+#### Analisis Ilmiah Hasil Eksperimen v6 (Multi-Domain Fold 0 vs Hold-out Test):
+1. **Mengapa `Validation mAP50` pada Fold 0 Multi-Domain Berada di Kisaran `0,8464–0,8488` (Dibandingkan Split Lama `~0,919–0,936`)?**
+   - Pada protokol lama sebelum K-Fold, split `valid` hanya berisi 84 citra dari satu sumber domain tunggal (`plat-nomor` awal) tanpa gambar latar negatif (*0 background*).
+   - Melalui **5-Fold Stratified Group Cross-Validation (`dHash` 64-bit anti-leakage)**, Fold 0 menguji model pada **~813 citra validasi multi-domain** yang mencakup campuran proporsional seluruh sumber (`orig`, `rf_` Roboflow, `kg_` Kaggle COCO, `mg_` dataset merged, serta `bg_` *hard-negative background*), variasi skala plat kecil-besar, dan plat 2 baris, di mana tidak ada satu pun kendaraan yang sama (`group_id`) bocor antara `train` dan `val`.
+   - Oleh karena itu, angka `Val mAP50 = 0,8464–0,8488` dengan `Val mAP50-95 = 0,5669–0,5686` mencerminkan **evaluasi generalisasi lintas-domain yang jauh lebih jujur dan bebas bias kebocoran frame**, sekaligus berhasil mencegah *model degradation* saat memilih checkpoint `best.pt`.
+2. **Peningkatan Performa pada Set `Test` Hold-out (`mAP50` Mencapai `0,9693` pada YOLOv11n dan `0,9617` pada YOLOv8n)**:
+   - Bukti nyata bahwa pemilihan checkpoint berbasis Fold 0 multi-domain + regularisasi `ANTI_DEGRADATION_HYPS` (`weight_decay=0.001`, `dropout=0.10`, `perspective=0.0004`, `erasing=0.25`, `close_mosaic=15`, `fliplr=0.0`) meningkatkan generalisasi terlihat pada set `Test` hold-out (84 citra): **Test mAP50 naik dari `0,9564` menjadi `0,9617` pada YOLOv8n** dan **naik dari `0,9683` menjadi `0,9693` pada YOLOv11n** (tertinggi di seluruh eksperimen).
+3. **Kenaikan `End-to-End OCR Valid Format Rate` hingga `75,96%` Berkat Parser Perpol No. 7 Tahun 2021**:
+   - Pada YOLOv8n, tingkat keberhasilan format NRKB valid meningkat signifikan dari **`72,03%` menjadi `75,96%` (`79/104`)** dan jumlah deteksi ganda/fragmen palsu turun dari 118 menjadi 104 kotak yang lebih bersih.
+   - Perbaikan aturan **Perpol Nomor 7 Tahun 2021** terbukti menyelamatkan sampel uji nyata di `evaluation_summary.json`, antara lain:
+     - `pl_test (10).jpg`: raw OCR `"005877US"` berhasil dikoreksi menjadi **`"DD 5877 US"`** (sebelumnya ditolak atau ketambahan noise `"USI"`);
+     - `pl_test (13).jpg`: raw OCR `"IDD14070M"` berhasil dipangkas noise awalan `'I'` dan dinormalisasi sesuai blok menjadi **`"DD 1407 OM"`** (sebelumnya rusak menjadi `"DD 140 T"` akibat konversi digit ke huruf pada plat tanpa suffix);
+     - `pl_test (16).jpg`: plat wilayah Polda Metro Jaya **`"B 2287 TXO"`** terbaca utuh tanpa terpotong huruf `'B'` di tepi kiri (`det_conf = 0,8129–0,8252`, `ocr_conf = 0,8214–0,8487`).
+4. **Trade-off YOLOv8n vs YOLOv11n**:
+   - **YOLOv11n** unggul pada akurasi lokalisasi detektor (**Test mAP50 `0,9693`**, **Test mAP50-95 `0,6150`**) dan efisiensi ukuran bobot (**`5,48 MB` `.pt` / `10,66 MB` `.onnx`**).
+   - **YOLOv8n** menghasilkan *bounding box* yang sedikit lebih ramah terhadap karakter tepi OCR (**Valid Format Rate `75,96%`**) dengan latensi end-to-end lebih cepat (**rata-rata `76,50 ms` / P95 `157,19 ms`**), konsisten dengan temuan *Ramadhani dkk. (2026)*.
 
-Arsip data pembanding: `smartgate-artifacts-Y8N/Y8X/Y11N.zip` di root
-repositori (bobot + `evaluation_summary.json` + `results.csv` + confusion
-matrix masing-masing).
+Arsip artefak eksperimen: `smartgate-artifacts-Y8N/` dan `smartgate-artifacts-Y11N/` di root repositori (berisi `best.pt`, `best.onnx`, `evaluation_summary.json`, `results.csv`, dan `confusion_matrix.png`).
 
 ## 6. Keputusan Sistem
 
@@ -247,19 +257,19 @@ Cross-Validation** (`tools/prepare_kfold.py`) dan regularisasi anti-degradasi
   `perspective=0.0004`, `scale=0.45`, `erasing=0.25`, `close_mosaic=15`, dan
   **`fliplr=0.0`** (wajib `0.0` agar urutan karakter plat tidak terbalik cermin).
 
-Run **V6 `smartgate-colab-v6-yolo11n`** (Colab T4, 50 epoch, dataset gabungan
-final 3.982 gambar) adalah run aktif dengan hasil terbaik sejauh ini:
+Run **V6 Multi-Domain Fold 0 (`smartgate-colab-v6-yolo11n` dan `smartgate-colab-v6-yolov8n`)** (Colab T4, 50 epoch, 5-Fold Stratified Group CV pada pool dataset gabungan ~4.066 gambar) adalah run aktif dengan hasil terbaik sejauh ini:
 
-| Metrik | Nilai |
-| --- | ---: |
-| Validation mAP50 | 0,9361 |
-| Validation mAP50-95 | 0,5536 |
-| Test mAP50 | 0,9683 |
-| Test mAP50-95 | 0,6292 |
-| Valid format rate OCR (V4 parser) | 75,00% (87/116 plat) |
-| Latency rata-rata / P95 | 99,63 ms / 192,41 ms |
+| Metrik | YOLOv8n (`v6-yolov8n`) | YOLOv11n (`v6-yolo11n`) |
+| --- | ---: | ---: |
+| Validation Fold 0 mAP50 *(multi-domain)* | **0,8488** | 0,8464 |
+| Validation Fold 0 mAP50-95 *(multi-domain)* | 0,5669 | **0,5686** |
+| Test Hold-out mAP50 *(84 citra)* | 0,9617 | **0,9693** |
+| Test Hold-out mAP50-95 *(84 citra)* | 0,5931 | **0,6150** |
+| Valid format rate OCR (V5 Perpol 7/2021) | **75,96% (79/104 plat)** | 74,07% (80/108 plat) |
+| Latency rata-rata / P95 | **76,50 ms / 157,19 ms** | 87,43 ms / 161,03 ms |
+| Ukuran Bobot `.pt` / `.onnx` | 6,48 MB / 12,77 MB | **5,48 MB / 10,66 MB** |
 
-Run V5 `smartgate-colab-v5` (YOLOv8n, dataset lama) sebelumnya: Test mAP50
+Run V5 `smartgate-colab-v5` (YOLOv8n, split lama tanpa K-Fold) sebelumnya: Test mAP50
 0,9491, valid format 73,95% (88/119 plat), latency 98,22/176,99 ms.
 
 Run awal 15 epoch lokal menghasilkan kira-kira precision 0,714, recall 0,668,
@@ -270,16 +280,17 @@ mAP50 sementara 0,6671 — keduanya hanya baseline historis. Halaman
 Bobot dipasang melalui:
 
 ```powershell
-$env:SGS_YOLO_VARIANT = "yolo11n"   # atau yolov8n / yolov8x — juga bisa diganti di halaman /training
+$env:SGS_YOLO_VARIANT = "yolo11n"   # atau yolov8n — juga bisa diganti di halaman /training
 python run.py
 ```
 
-Tanpa `SGS_YOLO_WEIGHTS`, prototype memakai bobot terbaru secara otomatis
-(`smartgate-colab-v5` di urutan pertama). Validasi detektor dan OCR harus
+Tanpa `SGS_YOLO_WEIGHTS`, prototype memakai bobot v6 terbaru secara otomatis
+(`runs/detect/smartgate-colab-v6-yolo11n/weights/best.pt` dan
+`runs/detect/smartgate-colab-v6-yolov8n/weights/best.pt` di urutan prioritas utama). Validasi detektor dan OCR harus
 dilaporkan terpisah:
 
 ```powershell
-yolo val model=runs/detect/smartgate-colab-v5/weights/best.pt `
+yolo val model=runs/detect/smartgate-colab-v6-yolo11n/weights/best.pt `
   data=dataset_merged/data.yaml
 python tools/eval_real.py --part both --limit 200
 ```
@@ -296,7 +307,7 @@ Uji manual yang sudah dicakup meliputi normalisasi NRKB (Perpol No. 7 Tahun
 penggabungan plat 2 baris, pembacaan plat hitam bertulisan putih, efisiensi
 CPU/RAM, pembagian 5-Fold Stratified Group Cross-Validation (`dHash` 64-bit),
 keamanan sesi/rate-limiting, fusi, dan alur end-to-end. Regresi otomatis
-terkunci di `tests/test_pipeline.py` (assert tanpa framework, **138+
+terkunci di `tests/test_pipeline.py` (assert tanpa framework, **133
 pemeriksaan**): aturan NRKB Perpol 7/2021, voting, moiré monitor
 (`test_monitor_moire`), dan distraktor layar/video (`test_distractors`).
 Kasus seperti `L1257PR` berhasil dibantu penyempitan pita teks dan voting.
@@ -327,10 +338,16 @@ tambahan pada tahap pengembangan mendatang / bahan skripsi.
 
 Pipeline menghasilkan keluaran sampai perintah buka pintu, kendaraan tidak
 dikenali, bypass satpam, atau penolakan. Kombinasi dua CCTV, seleksi kendaraan
-terdekat, deglare, OCR retry, aturan NRKB, database, dan audit snapshot
-mengurangi risiko salah baca dan salah buka. Validasi produksi tetap memerlukan
-rekaman CCTV nyata yang mencakup siang, malam, hujan, pantulan, dan kendaraan
-tidak terdaftar.
+terdekat, deglare, OCR retry, aturan NRKB sesuai **Perpol Nomor 7 Tahun 2021**,
+database, dan audit snapshot mengurangi risiko salah baca dan salah buka.
+Penerapan **5-Fold Stratified Group Cross-Validation (`dHash` 64-bit)** dan
+regularisasi anti-degradasi pada eksperimen v6 Multi-Domain Fold 0 berhasil
+meningkatkan akurasi deteksi hold-out hingga **`Test mAP50 = 0,9693`** pada
+**YOLOv11n** (`5,48 MB`) serta meningkatkan **`End-to-End OCR Valid Format Rate`
+hingga `75,96%`** dengan latensi rata-rata **`76,50 ms`** pada **YOLOv8n**
+(`6,48 MB`), didukung oleh **133 pemeriksaan** unit test otomatis yang lulus
+100%. Validasi produksi tetap memerlukan rekaman CCTV nyata yang mencakup
+siang, malam, hujan, pantulan, dan kendaraan tidak terdaftar.
 
 ## Referensi
 

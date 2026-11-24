@@ -15,7 +15,7 @@ Hasil OCR yang melanggar tata bahasa plat Indonesia ditolak keras (dianggap tida
 | [`Tugas Citra Digital/TUGAS_PENGOLAHAN_CITRA_DIGITAL.md`](Tugas%20Citra%20Digital/TUGAS_PENGOLAHAN_CITRA_DIGITAL.md) | Laporan akademik pengolahan citra digital & evaluasi eksperimen |
 | [`SmartGateSystem-audit-report.md`](SmartGateSystem-audit-report.md) | **Laporan Audit Menyeluruh**: keamanan, efisiensi CPU & RAM, serta analisis akurasi pengenalan plat, huruf, dan angka |
 | [`part2-remediation.md`](part2-remediation.md) | Panduan langkah-langkah remediasi keamanan & infrastruktur |
-| `smartgate-artifacts-*/` | Artefak hasil training Colab/Kaggle (`best.pt`, `best.onnx`, `evaluation_summary.json`, `results.csv`, `confusion_matrix.png`) untuk YOLOv8n, YOLOv8x, dan YOLOv11n |
+| `smartgate-artifacts-*/` | Artefak hasil training Colab/Kaggle (`best.pt`, `best.onnx`, `evaluation_summary.json`, `results.csv`, `confusion_matrix.png`) untuk YOLOv8n dan YOLOv11n |
 
 ---
 
@@ -55,7 +55,7 @@ Pipeline pengenalan dirancang berlapis di [`app/pipeline.py`](Tugas%20Citra%20Di
    - Memotong area atas frame kamera lebar (`SGS_DETECTION_ROI=0.05,0.35,0.95,1.0`) sebelum pra-pemrosesan agar wajah/jaket/latar atas tidak memicu false positive dan menghemat komputasi CPU.
    - Menyaring kandidat di luar zona gerbang dan memilih kendaraan terdekat kamera.
 2. **Deteksi Plat & Gerbang Kualitas Visual (`detect_plates`)**:
-   - Menggunakan model YOLO aktif (`yolo11n` / `yolov8n` / `yolov8x`) dengan fallback detektor morfologi-kontur OpenCV klasik.
+   - Menggunakan model YOLO aktif (`yolo11n` / `yolov8n`) dengan fallback detektor morfologi-kontur OpenCV klasik.
    - Setiap kandidat wajib lolos *geometry gate* (rasio aspek & proporsi luas), *texture gate* (tepi Canny pada kanal LAB), *plate border score* (bingkai gelap mengelilingi bidang plat untuk menolak subtitle/video), serta *glyph plausibility* (jumlah karakter minimum per baris sesuai profil kelas kendaraan di `app/vehicles.py`).
 3. **Penyempitan Pita Teks & Restorasi Crop (`snap_to_text_band`, `pad_crop`, `enhance_plate`, `deglare`)**:
    - Memangkas bodi/lampu dari kandidat plat, mengembalikan margin tepi (`pad_crop`) agar lengan huruf seperti `Y`, `G`, `4` tidak terpotong, serta menerapkan median blur 3×3 (anti-moiré monitor), CLAHE, penutupan morfologi, dan *unsharp mask* pada saat retry.
@@ -96,18 +96,19 @@ Sistem menegakkan aturan identifikasi plat nomor kendaraan Indonesia mengacu pad
 
 ---
 
-## Perbandingan Model Detektor (Runtime-Switchable)
+## Perbandingan Model Detektor (v6 Multi-Domain Fold 0 — Runtime-Switchable)
 
-Ketiga model dilatih pada dataset gabungan 3.982 gambar (anti-leakage SHA-256) selama 50 epoch dan dapat diganti langsung saat runtime dari halaman **`/training`**:
+Kedua model dilatih dengan protokol **5-Fold Stratified Group Cross-Validation (Fold 0: ~3.253 train : ~813 val multi-domain, anti-leakage `dHash` 64-bit + SHA-256)** dan regularisasi anti-degradasi selama 50 epoch di Google Colab GPU T4. Bobot ditempatkan di `runs/detect/smartgate-colab-v6-yolo11n/weights/best.pt` dan `runs/detect/smartgate-colab-v6-yolov8n/weights/best.pt` serta dapat diganti langsung saat runtime dari halaman **`/training`**:
 
-| Metrik Evaluasi | YOLOv8n | YOLOv8x | YOLOv11n (Rekomendasi) |
-| :--- | ---: | ---: | ---: |
-| Validation mAP50 | 0,9194 | 0,9338 | **0,9361** |
-| **Test mAP50** | 0,9564 | 0,9580 | **0,9683** |
-| Test mAP50-95 | **0,6309** | 0,5824 | 0,6292 |
-| **Valid Format OCR Rate** | 72,03% (85/118) | 67,52% (79/117) | **75,00% (87/116)** |
-| Latency Rata-rata / P95 | **96** / **176 ms** | 189 / 263 ms | 100 / 192 ms |
-| Ukuran Bobot `best.pt` | 6,5 MB | 136,7 MB | **5,5 MB** |
+| Metrik Evaluasi | YOLOv8n (`smartgate-colab-v6-yolov8n`) | YOLOv11n (`smartgate-colab-v6-yolo11n`) |
+| :--- | ---: | ---: |
+| **Validation Fold 0 mAP50** *(multi-domain)* | **0,8488** | 0,8464 |
+| **Validation Fold 0 mAP50-95** *(multi-domain)* | 0,5669 | **0,5686** |
+| **Test Hold-out mAP50** *(84 citra)* | 0,9617 | **0,9693** |
+| **Test Hold-out mAP50-95** *(84 citra)* | 0,5931 | **0,6150** |
+| **End-to-End OCR Valid Format Rate** | **75,96% (79/104)** | 74,07% (80/108) |
+| **Latency End-to-End Rata-rata / P95** | **76,50 ms / 157,19 ms** | 87,43 ms / 161,03 ms |
+| **Ukuran Bobot `best.pt` / `best.onnx`** | 6,48 MB / 12,77 MB | **5,48 MB / 10,66 MB** |
 
 ### Strategi Generalisasi & Cross-Validation (Mitigasi Degradasi Model)
 
@@ -163,7 +164,7 @@ Detail lengkap hasil pengecekan menyeluruh terhadap efisiensi CPU/RAM, akurasi p
 | `SGS_OCR_BACKEND` | `paddleocr` | Pilihan mesin OCR utama (`paddleocr`, `easyocr`, `template_match`) |
 | `SGS_ENABLE_SECONDARY_OCR` | `0` | Aktifkan (`1`) fallback lintas-engine OCR kedua (default `0` untuk mencegah dual-runtime RAM bloat) |
 | `SGS_SAVE_PIPELINE_STAGES` | `0` | Simpan seluruh 8 tahap citra PNG per frame (`1`) untuk laporan, atau hanya crop bukti *best frame* (`0`) |
-| `SGS_YOLO_VARIANT` / `SGS_YOLO_WEIGHTS` | `yolov8n` / `(auto)` | Varian model YOLO aktif (`yolov8n`, `yolov8x`, `yolo11n`) atau path ke `best.pt` |
+| `SGS_YOLO_VARIANT` / `SGS_YOLO_WEIGHTS` | `yolov8n` / `(auto)` | Varian model YOLO aktif (`yolov8n`, `yolo11n`) atau path ke `best.pt` |
 | `SGS_CPU_THREADS` | `cpu_count // 2` | Batas thread inferensi CPU untuk Paddle, PyTorch, dan OpenCV |
 | `SGS_MAX_CONCURRENT_INFER` | `1` | Batas inferensi paralel lintas request HTTP |
 | `SGS_DETECTION_ROI` | `0.05,0.35,0.95,1.0` | ROI deteksi bawah untuk frame kamera lebar (`x1,y1,x2,y2`) |
@@ -176,7 +177,7 @@ Detail lengkap hasil pengecekan menyeluruh terhadap efisiensi CPU/RAM, akurasi p
 
 ## Pengujian & Evaluasi
 
-Jalankan suite pemeriksaan mandiri (**141 pemeriksaan assert** tanpa ketergantungan `pytest`):
+Jalankan suite pemeriksaan mandiri (**133 pemeriksaan** regresi utama di `tests/test_pipeline.py` tanpa ketergantungan `pytest`):
 
 ```powershell
 cd "Tugas Citra Digital/prototype"

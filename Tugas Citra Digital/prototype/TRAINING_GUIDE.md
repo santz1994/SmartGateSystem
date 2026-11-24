@@ -205,29 +205,22 @@ callback `on_fit_epoch_end`).
 > dari halaman **/training** (bagian "Pilih Model Deteksi Aktif"), tersimpan
 > di `system_settings` (`yolo_variant`).
 
-**Perbandingan 3 arsitektur detektor** (dataset gabungan final, 50 epoch, T4,
-`seed=42`, run `smartgate-colab-v6-*`; arsip `smartgate-artifacts-Y8N/Y8X/Y11N.zip`
-di root repositori):
+**Perbandingan 2 arsitektur detektor utama** (5-Fold Stratified Group CV — Fold 0 multi-domain, 50 epoch, T4, `seed=42`, run `smartgate-colab-v6-yolov8n` dan `smartgate-colab-v6-yolo11n`; arsip `smartgate-artifacts-Y8N` dan `smartgate-artifacts-Y11N` di root repositori):
 
-| Metrik | YOLOv8n | YOLOv8x | YOLOv11n | Pemenang |
-| --- | ---: | ---: | ---: | --- |
-| Val mAP50 | 0,9194 | 0,9338 | **0,9361** | yolo11n |
-| Val mAP50-95 | **0,5635** | 0,5572 | 0,5536 | v8n |
-| Test mAP50 | 0,9564 | 0,9580 | **0,9683** | yolo11n |
-| Test mAP50-95 | **0,6309** | 0,5824 | 0,6292 | v8n |
-| Valid format OCR | 72,03% (85/118) | 67,52% (79/117) | **75,00%** (87/116) | yolo11n |
-| Latency avg / P95 | 96 / 176 ms | 189 / 263 ms | 100 / 192 ms | v8n (yolo11n setara) |
-| Bobot best.pt | 6,5 MB | 136,7 MB | **5,5 MB** | yolo11n |
+| Metrik | YOLOv8n (`v6-yolov8n`) | YOLOv11n (`v6-yolo11n`) | Pemenang |
+| --- | ---: | ---: | --- |
+| Val Fold 0 mAP50 *(multi-domain)* | **0,8488** | 0,8464 | v8n (+0,0024) |
+| Val Fold 0 mAP50-95 *(multi-domain)* | 0,5669 | **0,5686** | yolo11n (+0,0017) |
+| Test Hold-out mAP50 *(84 citra)* | 0,9617 | **0,9693** | **yolo11n (+0,0076)** |
+| Test Hold-out mAP50-95 *(84 citra)* | 0,5931 | **0,6150** | **yolo11n (+0,0219)** |
+| Valid format OCR (Perpol 7/2021) | **75,96%** (79/104) | 74,07% (80/108) | **v8n (+1,89%)** |
+| Latency avg / P95 | **76,50 / 157,19 ms** | 87,43 / 161,03 ms | **v8n** |
+| Bobot `best.pt` / `best.onnx` | 6,48 MB / 12,77 MB | **5,48 MB / 10,66 MB** | **yolo11n** |
 
 Kesimpulan:
-1. **YOLOv11n unggul keseluruhan** — Test mAP50 tertinggi, OCR paling stabil,
-   bobot paling kecil, latensi setara v8n. Arsitektur generasi baru lebih
-   efisien daripada sekadar memperbesar model (v8x).
-2. YOLOv8x unggul tipis di deteksi atas v8n tetapi kalah di stabilitas OCR
-   dan 2× lebih lambat — konsisten dengan Ramadhani dkk. (2026): akurasi
-   deteksi tidak otomatis berarti akurasi OCR lebih baik.
-3. Ketiganya bisa diuji langsung di aplikasi lewat **/training → Pilih Model
-   Deteksi Aktif** (metrik tiap model tampil di pilihan).
+1. **YOLOv11n unggul pada akurasi deteksi hold-out dan ukuran model** — Test mAP50 tertinggi (`0,9693`), Test mAP50-95 tertinggi (`0,6150`), dan bobot paling ringkas (`5,48 MB` `.pt` / `10,66 MB` `.onnx`).
+2. **YOLOv8n unggul pada Valid Format OCR Rate (`75,96%`, naik dari `72,03%`) dan latensi (`76,50 ms`)** — menghasilkan *bounding box* yang sedikit lebih longgar untuk pembacaan karakter tepi OCR, konsisten dengan Ramadhani dkk. (2026).
+3. Keduanya dapat diuji dan ditukar langsung di aplikasi lewat **/training → Pilih Model Deteksi Aktif** (`runs/detect/smartgate-colab-v6-yolo11n/weights/best.pt` dan `runs/detect/smartgate-colab-v6-yolov8n/weights/best.pt`).
 
 Run **V5 `smartgate-colab-v5`** (Colab, YOLOv8n, 50 epoch, dataset gabungan
 Roboflow + Kaggle COCO + background dengan anti-leakage) adalah baseline

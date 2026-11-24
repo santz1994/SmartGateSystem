@@ -65,6 +65,30 @@ DETECTION_ROI = tuple(
 # Batas ukuran upload (MB) untuk foto manual.
 MAX_UPLOAD_MB = 16
 
+# Urutan pencarian default bobot detektor YOLO (memprioritaskan v6 Multi-Domain Fold 0:
+# YOLOv11n dan YOLOv8n di runs/detect/smartgate-colab-v6-*/weights/best.pt).
+YOLO_MODEL_CANDIDATES: tuple[Path, ...] = (
+    BASE_DIR / "runs" / "detect" / "smartgate-colab-v6-yolo11n" / "weights" / "best.pt",
+    BASE_DIR / "runs" / "detect" / "smartgate-colab-v6-yolov8n" / "weights" / "best.pt",
+    BASE_DIR / "runs" / "detect" / "smartgate-colab-v5" / "weights" / "best.pt",
+    BASE_DIR / "runs" / "detect" / "runs" / "detect" / "smartgate" / "weights" / "best.pt",
+    BASE_DIR / "runs" / "detect" / "runs" / "detect" / "smartgate-full" / "weights" / "best.pt",
+)
+
+
+def resolve_yolo_model_path() -> Path:
+    """Kembalikan path bobot YOLO default dari env atau kandidat pertama yang tersedia."""
+    env_path = os.getenv("SGS_YOLO_WEIGHTS", "").strip()
+    if env_path:
+        return Path(env_path)
+    for candidate in YOLO_MODEL_CANDIDATES:
+        if candidate.is_file():
+            return candidate
+    return YOLO_MODEL_CANDIDATES[0]
+
+
+YOLO_MODEL_PATH: Path = resolve_yolo_model_path()
+
 
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)

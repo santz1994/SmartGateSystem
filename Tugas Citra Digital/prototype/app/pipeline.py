@@ -485,7 +485,7 @@ def split_rows(crop: Any) -> list[Any]:
     kosong. Celah hanya diterima bila menyisakan dua pita yang sama-sama cukup
     tinggi, jadi margin/border pada plat 1 baris tidak ikut membelah papan.
     """
-    binary = _ink_mask(crop)
+    binary = _ink_mask(crop, trim_x=0.06)
     h = binary.shape[0]
     if h < 16:
         return [crop]
@@ -526,7 +526,7 @@ def text_rows(crop: Any, min_height_frac: float = 0.10) -> list[Any]:
     sebagai satu teks, stiker itulah yang menang dibaca — bukan nomor plat.
     Pita tipis (border/bingkai) dibuang lewat ``min_height_frac``.
     """
-    binary = _ink_mask(crop)
+    binary = _ink_mask(crop, trim_x=0.06)
     h, w = binary.shape
     if h < 16:
         return [crop]
@@ -604,7 +604,7 @@ def snap_to_text_band(
     y1 = max(min(a for a, _ in keep) - int(h * 0.05), 0)
     y2 = min(max(b for _, b in keep) + int(h * 0.05), h)
     if keep_horizontal:
-        x1, x2 = 0, w
+        x1, x2 = 0, int(crop.shape[1])
     else:
         sub = binary[y1:y2]
         cols = np.nonzero((sub > 0).sum(axis=0) > max(1, int(sub.shape[0] * 0.05)))[0]

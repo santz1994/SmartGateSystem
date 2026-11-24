@@ -205,10 +205,11 @@ Hasil akhir yang tetap melanggar struktur NRKB (bagian depan wajib kode wilayah 
 
 ### 5.5 Pemilihan Varian Model Deteksi
 
-Tiga bobot custom tersedia dan dapat ditukar saat runtime (model dimuat ulang
-otomatis): `yolov8n`, `yolov8x`, `yolo11n` — dipetakan di
-`app/detect_yolo.py::VARIANTS` ke
-`runs/detect/smartgate-colab-v6-<varian>/weights/best.pt`.
+Dua bobot custom tersedia dan dapat ditukar saat runtime (model dimuat ulang
+otomatis): `yolo11n` dan `yolov8n` — dipetakan di
+`app/detect_yolo.py::VARIANTS` (dan `app/config.py::YOLO_MODEL_CANDIDATES`) ke
+`runs/detect/smartgate-colab-v6-yolo11n/weights/best.pt` dan
+`runs/detect/smartgate-colab-v6-yolov8n/weights/best.pt`.
 
 - Pilih lewat halaman **/training** ("Pilih Model Deteksi Aktif") atau
   `POST /api/settings {"yolo_variant": "yolo11n"}`.

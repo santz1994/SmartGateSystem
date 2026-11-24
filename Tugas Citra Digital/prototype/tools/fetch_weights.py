@@ -25,7 +25,6 @@ PROTOTYPE = Path(__file__).resolve().parent.parent
 
 VARIANTS = {
     "yolov8n": "Y8N",
-    "yolov8x": "Y8X",
     "yolo11n": "Y11N",
 }
 TARGETS = {
@@ -111,7 +110,7 @@ def fetch(name: str, source: Path | None = None, url: str | None = None) -> bool
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Isi bobot YOLO ke runs/detect/")
-    parser.add_argument("variants", nargs="*", help="varian yang diisi: yolov8n yolov8x yolo11n (default: semua)")
+    parser.add_argument("variants", nargs="*", help="varian yang diisi: yolov8n yolo11n (default: semua)")
     parser.add_argument("--source", type=Path, help="folder/zip artefak lokal")
     parser.add_argument("--url", help="URL unduhan best.pt")
     args = parser.parse_args()

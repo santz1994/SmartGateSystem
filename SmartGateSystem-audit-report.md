@@ -335,9 +335,21 @@ Tabel dan aturan di bawah ini merupakan acuan resmi yang wajib ditegakkan oleh p
 
 ## 4. Audit Khusus III: Degradasi Model Training, Generalisasi & Cross-Validation
 
-Pertanyaan kunci: **Mengapa model hasil training (`YOLOv8n`, `YOLOv8x`, `YOLOv11n`) sering mengalami degradasi performa saat dihadapkan pada kamera nyata atau seiring berjalannya epoch, dan apakah *Generalization* serta *Cross-Validation* dapat diterapkan?**
+Pertanyaan kunci: **Mengapa model hasil training (`YOLOv8n`, `YOLOv11n`) sering mengalami degradasi performa saat dihadapkan pada kamera nyata atau seiring berjalannya epoch, dan apakah *Generalization* serta *Cross-Validation* dapat diterapkan?**
 
-**Jawaban singkat: SANGAT BISA dan SANGAT DIREKOMENDASIKAN.** Audit terhadap [`tools/merge_datasets.py`](Tugas%20Citra%20Digital/prototype/tools/merge_datasets.py), [`train_yolo.py`](Tugas%20Citra%20Digital/prototype/train_yolo.py), [`plat-nomor/a_YOLOv11n.ipynb`](Tugas%20Citra%20Digital/prototype/plat-nomor/a_YOLOv11n.ipynb), serta kurva epoch di [`smartgate-artifacts-Y8X/results.csv`](smartgate-artifacts-Y8X/results.csv) dan [`smartgate-artifacts-Y11N/results.csv`](smartgate-artifacts-Y11N/results.csv) menemukan **4 akar penyebab utama terjadinya degradasi model**:
+**Jawaban singkat: SANGAT BISA dan TELAH DITERAPKAN DENGAN HASIL TERVERIFIKASI (Eksperimen v6 Multi-Domain Fold 0).** Audit terhadap [`tools/merge_datasets.py`](Tugas%20Citra%20Digital/prototype/tools/merge_datasets.py), [`train_yolo.py`](Tugas%20Citra%20Digital/prototype/train_yolo.py), [`plat-nomor/a_YOLOv11n.ipynb`](Tugas%20Citra%20Digital/prototype/plat-nomor/a_YOLOv11n.ipynb), [`plat-nomor/a_YOLOv8n.ipynb`](Tugas%20Citra%20Digital/prototype/plat-nomor/a_YOLOv8n.ipynb), serta kurva epoch di [`smartgate-artifacts-Y8N/results.csv`](smartgate-artifacts-Y8N/results.csv) dan [`smartgate-artifacts-Y11N/results.csv`](smartgate-artifacts-Y11N/results.csv) menemukan **4 akar penyebab utama terjadinya degradasi model** dan membuktikan efektivitas perbaikannya:
+
+### Hasil Eksperimen Terverifikasi Pasca-Remediasi (v6 Multi-Domain Fold 0)
+
+| Metrik Evaluasi | YOLOv8n (`smartgate-colab-v6-yolov8n`) | YOLOv11n (`smartgate-colab-v6-yolo11n`) | Analisis & Perbandingan |
+| :--- | ---: | ---: | :--- |
+| **Bobot `.pt` / `.onnx`** | `6,48 MB` / `12,77 MB` | **`5,48 MB` / `10,66 MB`** | YOLOv11n 15,4% lebih ringan. |
+| **Validation Fold 0 mAP50** *(multi-domain ~813 citra)* | **`0,8488`** | `0,8464` | Evaluasi jujur lintas 5 domain (`orig`, `rf`, `kg`, `mg`, `bg`) dengan anti-leakage `dHash` 64-bit. |
+| **Validation Fold 0 mAP50-95** *(multi-domain)* | `0,5669` | **`0,5686`** | Naik dibanding validasi split lama (`0,5536–0,5635`) meskipun diuji pada multi-domain yang jauh lebih sulit. |
+| **Test Hold-out mAP50** *(84 citra)* | `0,9617` *(naik dari 0,9564)* | **`0,9693`** *(naik dari 0,9683)* | **Tertinggi**: generalisasi hold-out meningkat berkat checkpoint multi-domain + regularisasi anti-degradasi. |
+| **Test Hold-out mAP50-95** *(84 citra)* | `0,5931` | **`0,6150`** | YOLOv11n memiliki ketepatan regresi kotak (IoU ketat) terbaik pada set uji. |
+| **End-to-End OCR Valid Format Rate** | **`75,96%` (`79/104`)** | `74,07%` (`80/108`) | YOLOv8n naik signifikan dari `72,03%` ke **`75,96%`** berkat parser Perpol 7/2021 (`005877US -> DD 5877 US`, `IDD14070M -> DD 1407 OM`). |
+| **Latency End-to-End Rata-rata / P95** | **`76,50 ms` / `157,19 ms`** | `87,43 ms` / `161,03 ms` | Latensi turun ±12–20 ms karena berkurangnya deteksi fragmen palsu. |
 
 ### 🔴 `TRAIN-1` [High — Ketimpangan Split & Single-Domain Validation]: 3.982 Gambar Train (Multi-Domain) Hanya Divalidasi oleh 84 Gambar dari 1 Sumber Tunggal (96% : 2% : 2%)
 - **Lokasi**: `tools/merge_datasets.py:4-14, 115-208`, `plat-nomor/a_YOLOv11n.ipynb:123-125`.

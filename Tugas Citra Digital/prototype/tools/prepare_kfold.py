@@ -310,6 +310,8 @@ def write_kfold_manifests(
     """Tulis manifest ``fold_{k}_train.txt``, ``fold_{k}_val.txt``, dan ``data_fold_{k}.yaml``."""
     out_dir = data_root / out_subdir
     out_dir.mkdir(parents=True, exist_ok=True)
+    for cache_file in out_dir.glob("*.cache"):
+        cache_file.unlink(missing_ok=True)
 
     strata = [s.stratum for s in samples]
     groups = [s.group_id for s in samples]
@@ -321,10 +323,10 @@ def write_kfold_manifests(
         val_txt = out_dir / f"fold_{fold_idx}_val.txt"
         yaml_path = out_dir / f"data_fold_{fold_idx}.yaml"
 
-        # Ultralytics YOLO membaca path relatif terhadap direktori file .txt
-        # atau path absolut; gunakan prefix ../ agar relatif dari `folds/` ke `data_root`.
-        train_lines = [f"../{samples[i].rel_image_path}" for i in train_idx]
-        val_lines = [f"../{samples[i].rel_image_path}" for i in val_idx]
+        # Ultralytics YOLO me-resolve path di dalam manifest .txt relatif terhadap CWD / root dataset,
+        # bukan relatif terhadap subdirektori `folds/`. Gunakan path absolut hasil resolve() agar bebas dari error `../`.
+        train_lines = [str((data_root / samples[i].rel_image_path).resolve().as_posix()) for i in train_idx]
+        val_lines = [str((data_root / samples[i].rel_image_path).resolve().as_posix()) for i in val_idx]
         train_txt.write_text("\n".join(train_lines) + "\n", encoding="utf-8")
         val_txt.write_text("\n".join(val_lines) + "\n", encoding="utf-8")
 

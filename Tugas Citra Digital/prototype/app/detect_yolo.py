@@ -56,16 +56,16 @@ ASPECT_RANGES = {
 
 VARIANT_ENV = "SGS_YOLO_VARIANT"
 VARIANTS: dict[str, str] = {
-    "yolov8n": "runs/detect/smartgate-colab-v6-yolov8n/weights/best.pt",
-    "yolov8x": "runs/detect/smartgate-colab-v6-yolov8x/weights/best.pt",
     "yolo11n": "runs/detect/smartgate-colab-v6-yolo11n/weights/best.pt",
+    "yolov8n": "runs/detect/smartgate-colab-v6-yolov8n/weights/best.pt",
 }
 FALLBACK_WEIGHTS = (
     "runs/detect/smartgate-colab-v5/weights/best.pt",
     "runs/detect/runs/detect/smartgate/weights/best.pt",
     "runs/detect/runs/detect/smartgate-full/weights/best.pt",
 )
-_variant: str = os.getenv(VARIANT_ENV, "yolov8n")
+_raw_variant = os.getenv(VARIANT_ENV, "yolov8n").strip()
+_variant: str = _raw_variant if _raw_variant in VARIANTS else "yolov8n"
 
 
 def current_variant() -> str:
@@ -73,7 +73,7 @@ def current_variant() -> str:
 
 
 def set_variant(name: str) -> None:
-    """Ganti model deteksi aktif (mis. yolov8n vs yolov8x) dan muat ulang bobot."""
+    """Ganti model deteksi aktif (yolov8n vs yolo11n) dan muat ulang bobot."""
     global _variant
     if name not in VARIANTS:
         raise ValueError(f"Varian model tidak dikenal: {name}")

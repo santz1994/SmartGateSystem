@@ -1,21 +1,31 @@
 {
   "model": "/content/smartgate-sources/runs/detect/smartgate-colab-v6-yolo11n/weights/best.pt",
   "onnx_model": "/content/smartgate-sources/runs/detect/smartgate-colab-v6-yolo11n/weights/best.onnx",
+  "cv_folds": [
+    {
+      "fold": 0,
+      "mAP50": 0.8464,
+      "mAP50_95": 0.5686,
+      "weights": "/content/smartgate-sources/runs/detect/smartgate-colab-v6-yolo11n/weights/best.pt"
+    }
+  ],
+  "cv_mAP50_mean": 0.8464,
+  "cv_mAP50_std": 0.0,
   "validation": {
-    "mAP50": 0.9360921456265417,
-    "mAP50_95": 0.5535825239886951
+    "mAP50": 0.8464312336342621,
+    "mAP50_95": 0.5686267551922946
   },
   "test": {
     "images": 84,
-    "mAP50": 0.9683075286169576,
-    "mAP50_95": 0.6291739561900344
+    "mAP50": 0.9692602441113816,
+    "mAP50_95": 0.6150215589376831
   },
   "ocr_and_gate_benchmark": {
-    "total_detected_plates": 116,
-    "valid_indonesian_format_count": 87,
-    "valid_format_rate": 0.75,
-    "avg_end_to_end_latency_ms": 99.63,
-    "p95_end_to_end_latency_ms": 192.41
+    "total_detected_plates": 108,
+    "valid_indonesian_format_count": 80,
+    "valid_format_rate": 0.7407,
+    "avg_end_to_end_latency_ms": 87.43,
+    "p95_end_to_end_latency_ms": 161.03
   },
   "detector_target_mAP50": 0.98,
   "detector_target_met": false,
@@ -24,20 +34,20 @@
     {
       "file": "pl_test (1).jpg",
       "bbox": [
-        239,
-        503,
-        478,
-        613
+        238,
+        505,
+        482,
+        615
       ],
-      "plate_number": "U",
-      "raw_ocr": "U",
+      "plate_number": "47L",
+      "raw_ocr": "47L",
       "is_valid_format": false,
       "plate_color": "WHITE",
-      "det_conf": 0.8196,
-      "ocr_conf": 0.0709,
+      "det_conf": 0.7973,
+      "ocr_conf": 0.0975,
       "quality": {
-        "blur_score": 147.71,
-        "brightness": 173.87,
+        "blur_score": 143.2,
+        "brightness": 170.57,
         "is_usable": true
       }
     },
@@ -46,178 +56,178 @@
       "bbox": [
         324,
         386,
-        473,
+        472,
         453
       ],
       "plate_number": "DD 5877 US",
       "raw_ocr": "005877US",
       "is_valid_format": true,
       "plate_color": "WHITE",
-      "det_conf": 0.8254,
-      "ocr_conf": 0.4634,
+      "det_conf": 0.7951,
+      "ocr_conf": 0.7099,
       "quality": {
-        "blur_score": 3573.87,
-        "brightness": 109.76,
+        "blur_score": 3556.8,
+        "brightness": 109.97,
         "is_usable": true
       }
     },
     {
       "file": "pl_test (11).jpg",
       "bbox": [
-        91,
-        671,
-        271,
+        90,
+        672,
+        273,
         761
       ],
-      "plate_number": "DD 5411 XA",
-      "raw_ocr": "DD54L1XA",
+      "plate_number": "DD 5441 XAS",
+      "raw_ocr": "DD5441XAS",
       "is_valid_format": true,
       "plate_color": "WHITE",
-      "det_conf": 0.8425,
-      "ocr_conf": 0.5526,
+      "det_conf": 0.7835,
+      "ocr_conf": 0.8033,
       "quality": {
-        "blur_score": 1310.54,
-        "brightness": 142.62,
+        "blur_score": 1303.58,
+        "brightness": 142.07,
         "is_usable": true
       }
     },
     {
       "file": "pl_test (12).jpg",
       "bbox": [
-        321,
-        435,
-        476,
-        500
+        317,
+        434,
+        478,
+        503
       ],
-      "plate_number": "DD 2977 XBP",
-      "raw_ocr": "DD2977XBP",
+      "plate_number": "DD 2974 TXB",
+      "raw_ocr": "DD29747XBP",
       "is_valid_format": true,
       "plate_color": "WHITE",
-      "det_conf": 0.81,
-      "ocr_conf": 0.878,
+      "det_conf": 0.8023,
+      "ocr_conf": 0.763,
       "quality": {
-        "blur_score": 2741.32,
-        "brightness": 120.54,
+        "blur_score": 2634.46,
+        "brightness": 117.22,
         "is_usable": true
       }
     },
     {
       "file": "pl_test (13).jpg",
       "bbox": [
-        392,
+        395,
         360,
         538,
-        412
+        421
       ],
-      "plate_number": "DD 140 T",
-      "raw_ocr": "DD1407",
+      "plate_number": "D 1407 QF",
+      "raw_ocr": "OD1407QF",
       "is_valid_format": true,
       "plate_color": "WHITE",
-      "det_conf": 0.6137,
-      "ocr_conf": 0.8793,
+      "det_conf": 0.7181,
+      "ocr_conf": 0.279,
       "quality": {
-        "blur_score": 1004.44,
-        "brightness": 147.37,
+        "blur_score": 900.12,
+        "brightness": 135.52,
         "is_usable": true
       }
     },
     {
       "file": "pl_test (14).jpg",
       "bbox": [
-        430,
-        531,
+        433,
+        534,
         572,
         600
       ],
-      "plate_number": "DD 227 O",
-      "raw_ocr": "DD2270",
-      "is_valid_format": true,
+      "plate_number": "J02270",
+      "raw_ocr": "J02270",
+      "is_valid_format": false,
       "plate_color": "BLACK",
-      "det_conf": 0.7719,
-      "ocr_conf": 0.9375,
+      "det_conf": 0.7805,
+      "ocr_conf": 0.7691,
       "quality": {
-        "blur_score": 444.27,
-        "brightness": 85.31,
+        "blur_score": 460.19,
+        "brightness": 87.05,
         "is_usable": true
       }
     },
     {
       "file": "pl_test (15).jpg",
       "bbox": [
-        296,
+        297,
         568,
-        443,
-        640
+        445,
+        635
       ],
-      "plate_number": "DD 2978 NT",
-      "raw_ocr": "DD2978NT",
+      "plate_number": "DD 2978 NI",
+      "raw_ocr": "DD2978NI",
       "is_valid_format": true,
       "plate_color": "WHITE",
-      "det_conf": 0.7481,
-      "ocr_conf": 0.7532,
+      "det_conf": 0.7006,
+      "ocr_conf": 0.8594,
       "quality": {
-        "blur_score": 1607.63,
-        "brightness": 129.77,
+        "blur_score": 1693.29,
+        "brightness": 133.42,
         "is_usable": true
       }
     },
     {
       "file": "pl_test (16).jpg",
       "bbox": [
-        264,
-        561,
-        447,
-        647
+        261,
+        559,
+        449,
+        651
       ],
       "plate_number": "B 2287 TXO",
       "raw_ocr": "B2287TXO",
       "is_valid_format": true,
       "plate_color": "WHITE",
-      "det_conf": 0.7724,
-      "ocr_conf": 0.8053,
+      "det_conf": 0.8252,
+      "ocr_conf": 0.8487,
       "quality": {
-        "blur_score": 1748.18,
-        "brightness": 107.05,
+        "blur_score": 1598.03,
+        "brightness": 102.75,
         "is_usable": true
       }
     },
     {
       "file": "pl_test (17).jpg",
       "bbox": [
-        177,
-        567,
-        376,
+        178,
+        568,
+        383,
         666
       ],
-      "plate_number": "ODEEZ",
-      "raw_ocr": "ODEEZ",
+      "plate_number": "DEEZ17",
+      "raw_ocr": "0DEEZ17",
       "is_valid_format": false,
       "plate_color": "WHITE",
-      "det_conf": 0.8304,
-      "ocr_conf": 0.3884,
+      "det_conf": 0.8374,
+      "ocr_conf": 0.5617,
       "quality": {
-        "blur_score": 653.23,
-        "brightness": 186.17,
+        "blur_score": 635.99,
+        "brightness": 182.48,
         "is_usable": true
       }
     },
     {
       "file": "pl_test (18).jpg",
       "bbox": [
-        255,
+        257,
         464,
         384,
-        523
+        521
       ],
-      "plate_number": "DD 8671 IZH",
-      "raw_ocr": "DD867112HI",
+      "plate_number": "DD 8671 IZM",
+      "raw_ocr": "DD867112MM",
       "is_valid_format": true,
       "plate_color": "WHITE",
-      "det_conf": 0.7118,
-      "ocr_conf": 0.5901,
+      "det_conf": 0.6894,
+      "ocr_conf": 0.5572,
       "quality": {
-        "blur_score": 1276.0,
-        "brightness": 149.25,
+        "blur_score": 1350.1,
+        "brightness": 154.1,
         "is_usable": true
       }
     }
