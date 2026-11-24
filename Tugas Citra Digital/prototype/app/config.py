@@ -95,13 +95,23 @@ def onnxruntime_available() -> bool:
     return importlib.util.find_spec("onnxruntime") is not None
 
 
+def onnx_backend_available() -> bool:
+    """True bila runtime ONNX tersedia (``onnxruntime`` atau ``cv2.dnn`` bawaan OpenCV)."""
+    import importlib.util
+
+    return (
+        importlib.util.find_spec("onnxruntime") is not None
+        or importlib.util.find_spec("cv2") is not None
+    )
+
+
 def resolve_yolo_model_path() -> Path:
     """Kembalikan path bobot YOLO default dari env atau kandidat pertama yang tersedia."""
     env_path = os.getenv("SGS_YOLO_WEIGHTS", "").strip()
     if env_path:
         return Path(env_path)
     use_onnx = os.getenv("SGS_USE_ONNX", "1").strip().lower() not in {"0", "false", "no"}
-    if use_onnx and onnxruntime_available():
+    if use_onnx and onnx_backend_available():
         for candidate in YOLO_ONNX_CANDIDATES:
             if candidate.is_file():
                 return candidate

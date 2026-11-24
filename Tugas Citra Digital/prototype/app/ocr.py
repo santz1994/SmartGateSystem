@@ -367,13 +367,10 @@ def _configure_paddle_cpu() -> None:
 
     os.environ["FLAGS_use_mkldnn"] = "0"
     os.environ["FLAGS_enable_pir_api"] = "0"
-    try:
-        import paddle  # type: ignore[import-untyped]
-
-        paddle.set_flags({"FLAGS_use_mkldnn": False})
-    except Exception:  # noqa: BLE001
-        pass
-
+    # Muat paddlex (yang secara internal mengimpor modelscope/torch bila ada)
+    # SEBELUM `import paddle`: pada Windows, memuat `paddle` lebih dulu
+    # mengakibatkan konflik DLL `[WinError 127]` pada `torch\lib\shm.dll`
+    # dan memicu `RuntimeError: PDX has already been initialized` pada import ulang.
     try:
         from paddlex.inference.models.runners.paddle_static.config.pp_option import (  # type: ignore[import-untyped]
             PaddlePredictorOption,
@@ -390,6 +387,13 @@ def _configure_paddle_cpu() -> None:
             _without_mkldnn._sgs_patched = True  # type: ignore[attr-defined]
             PaddlePredictorOption.setdefault_by_model_name = _without_mkldnn  # type: ignore[method-assign]
     except Exception:  # noqa: BLE001 - paddlex versi lain biarkan perilaku bawaan
+        pass
+
+    try:
+        import paddle  # type: ignore[import-untyped]
+
+        paddle.set_flags({"FLAGS_use_mkldnn": False})
+    except Exception:  # noqa: BLE001
         pass
 
 

@@ -77,9 +77,133 @@ _variant: str = _raw_variant if _raw_variant in VARIANTS else "yolov8n"
 
 
 def _use_onnx() -> bool:
-    """Aktif bila SGS_USE_ONNX!=0 dan paket ``onnxruntime`` tersedia."""
+    """Aktif bila SGS_USE_ONNX!=0 dan backend ONNX (onnxruntime / cv2.dnn) tersedia."""
     enabled = os.getenv(ONNX_ENV, "1").strip().lower() not in {"0", "false", "no"}
-    return enabled and config.onnxruntime_available()
+    return enabled and config.onnx_backend_available()
+
+
+def _onnx_runtime_name() -> str:
+    return "onnxruntime" if config.onnxruntime_available() else "opencv-dnn-onnx"
+
+
+class _OnnxYoloRunner:
+    """Runner YOLOv8/YOLOv11 ``.onnx`` murni (tanpa ``torch`` / ``ultralytics``).
+
+    Menghindari konflik DLL Windows antara PaddlePaddle dan ``torch\\lib\\shm.dll``
+    sekaligus memangkas pemakaian RAM produksi CPU. Menggunakan ``onnxruntime``
+    bila terpasang, atau ``cv2.dnn.readNetFromONNX`` bawaan OpenCV.
+    """
+
+    def __init__(self, weight_file: Path, imgsz: int = 640) -> None:
+        self.path = weight_file
+        self.imgsz = imgsz
+        self.backend = "opencv-dnn-onnx"
+        self._ort_session: Any = None
+        self._ort_input_name: str = ""
+        self._cv_net: Any = None
+
+        if config.onnxruntime_available():
+            import onnxruntime as ort
+
+            opts = ort.SessionOptions()
+            opts.intra_op_num_threads = config.CPU_THREADS
+            opts.inter_op_num_threads = 1
+            self._ort_session = ort.InferenceSession(
+                str(weight_file), sess_options=opts, providers=["CPUExecutionProvider"]
+            )
+            self._ort_input_name = self._ort_session.get_inputs()[0].name
+            self.backend = "onnxruntime"
+        else:
+            import cv2
+
+            self._cv_net = cv2.dnn.readNetFromONNX(str(weight_file))
+            self.backend = "opencv-dnn-onnx"
+
+    def predict_boxes(
+        self, image: Any, conf: float = DEFAULT_CONF, iou: float = 0.45
+    ) -> list[tuple[float, float, float, float, float, int]]:
+        import cv2
+        import numpy as np
+
+        h, w = image.shape[:2]
+        if h == 0 or w == 0:
+            return []
+        size = self.imgsz
+        scale = min(size / float(w), size / float(h))
+        new_w = max(1, int(round(w * scale)))
+        new_h = max(1, int(round(h * scale)))
+        resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        pad_x = (size - new_w) // 2
+        pad_y = (size - new_h) // 2
+        canvas = np.full((size, size, 3), 114, dtype=np.uint8)
+        canvas[pad_y : pad_y + new_h, pad_x : pad_x + new_w] = resized
+
+        blob = cv2.dnn.blobFromImage(
+            canvas, 1.0 / 255.0, (size, size), swapRB=True, crop=False
+        )
+        if self._ort_session is not None:
+            raw = self._ort_session.run(None, {self._ort_input_name: blob})[0]
+        else:
+            self._cv_net.setInput(blob)
+            raw = self._cv_net.forward()
+
+        preds = np.squeeze(raw, axis=0)
+        if preds.ndim == 2 and preds.shape[0] < preds.shape[1]:
+            preds = preds.T  # (8400, 4 + nc)
+        if preds.ndim != 2 or preds.shape[1] < 5:
+            return []
+
+        cls_scores = preds[:, 4:]
+        if cls_scores.shape[1] == 1:
+            scores = cls_scores[:, 0]
+            class_ids = np.zeros(len(scores), dtype=np.int32)
+        else:
+            class_ids = np.argmax(cls_scores, axis=1)
+            scores = cls_scores[np.arange(len(preds)), class_ids]
+
+        keep = scores >= conf
+        if not np.any(keep):
+            return []
+
+        boxes_xywh = preds[keep, :4]
+        scores_kept = scores[keep]
+        classes_kept = class_ids[keep]
+
+        cx, cy, bw, bh = (
+            boxes_xywh[:, 0],
+            boxes_xywh[:, 1],
+            boxes_xywh[:, 2],
+            boxes_xywh[:, 3],
+        )
+        x1 = np.clip((cx - bw * 0.5 - pad_x) / scale, 0.0, float(w))
+        y1 = np.clip((cy - bh * 0.5 - pad_y) / scale, 0.0, float(h))
+        x2 = np.clip((cx + bw * 0.5 - pad_x) / scale, 0.0, float(w))
+        y2 = np.clip((cy + bh * 0.5 - pad_y) / scale, 0.0, float(h))
+
+        nms_boxes = [
+            [float(a), float(b), float(c - a), float(d - b)]
+            for a, b, c, d in zip(x1, y1, x2, y2)
+        ]
+        indices = cv2.dnn.NMSBoxes(
+            nms_boxes, scores_kept.astype(float).tolist(), float(conf), float(iou)
+        )
+        if len(indices) == 0:
+            return []
+
+        out: list[tuple[float, float, float, float, float, int]] = []
+        for idx in np.asarray(indices).flatten():
+            i = int(idx)
+            out.append(
+                (
+                    float(x1[i]),
+                    float(y1[i]),
+                    float(x2[i]),
+                    float(y2[i]),
+                    float(scores_kept[i]),
+                    int(classes_kept[i]),
+                )
+            )
+        return out
 
 
 def current_variant() -> str:
@@ -118,7 +242,7 @@ def available_variants() -> dict[str, dict[str, Any]]:
         ready = active_file.is_file()
         info: dict[str, Any] = {
             "weights": str(active_file),
-            "runtime": "onnxruntime" if active_file.suffix.lower() == ".onnx" else "pytorch",
+            "runtime": _onnx_runtime_name() if active_file.suffix.lower() == ".onnx" else "pytorch",
             "ready": ready,
             "size_mb": round(active_file.stat().st_size / 1e6, 1) if ready else 0,
         }
@@ -166,37 +290,45 @@ def weights_path() -> Path | None:
 
 @lru_cache(maxsize=1)
 def _model() -> Any | None:
-    """Muat model sekali saja (lru_cache) & panaskan layer fusion. ``None`` bila belum bisa dipakai."""
+    """Muat model sekali saja (lru_cache) & panaskan inferensi. ``None`` bila belum bisa dipakai.
+
+    Untuk file ``.onnx``, pemuatan dilakukan murni lewat :class:`_OnnxYoloRunner`
+    (``onnxruntime`` atau ``cv2.dnn``) **tanpa mengimpor ``torch``/``ultralytics``**
+    sehingga bebas konflik DLL Windows dengan PaddlePaddle dan jauh lebih hemat RAM.
+    """
     path = weights_path()
     if path is None:
         return None
+
+    import numpy as np
+
+    if path.suffix.lower() == ".onnx":
+        try:
+            runner = _OnnxYoloRunner(path)
+            runner.predict_boxes(np.zeros((160, 160, 3), dtype=np.uint8), conf=DEFAULT_CONF)
+            return runner
+        except Exception:  # noqa: BLE001
+            fallback_pt = _default_weights(prefer_onnx=False)
+            if fallback_pt is None or fallback_pt == path:
+                return None
+            path = fallback_pt
+
     try:
         from ultralytics import YOLO
-        import numpy as np
         import torch
 
         torch.set_num_threads(config.CPU_THREADS)
-    except ImportError:
+    except (ImportError, OSError):
         return None
 
-    def _load_and_warmup(weight_file: Path) -> Any:
-        yolo = YOLO(str(weight_file), task="detect")
-        # Panggilan predict pertama melakukan Conv+BN fusion / inisialisasi session
-        # ONNX (~1,5-2 dtk di CPU); lakukan saat warmup agar scan pertama cepat.
+    try:
+        yolo = YOLO(str(path), task="detect")
+        # Panggilan predict pertama melakukan Conv+BN fusion (~1,5-2 dtk di CPU);
+        # lakukan saat warmup agar scan pertama pengguna langsung cepat.
         dummy = np.zeros((160, 160, 3), dtype=np.uint8)
         yolo.predict(dummy, conf=DEFAULT_CONF, imgsz=160, verbose=False)
         return yolo
-
-    try:
-        return _load_and_warmup(path)
     except Exception:  # noqa: BLE001
-        if path.suffix.lower() == ".onnx":
-            fallback_pt = _default_weights(prefer_onnx=False)
-            if fallback_pt is not None and fallback_pt != path:
-                try:
-                    return _load_and_warmup(fallback_pt)
-                except Exception:  # noqa: BLE001
-                    return None
         return None
 
 
@@ -209,9 +341,10 @@ def status() -> dict[str, Any]:
     path = weights_path()
     if path is None:
         return {"backend": "opencv", "yolo": False, "reason": f"{ENV_VAR} belum diisi"}
-    if _model() is None:
-        return {"backend": "opencv", "yolo": False, "reason": "ultralytics belum terpasang"}
-    runtime = "onnxruntime" if path.suffix.lower() == ".onnx" else "pytorch"
+    model = _model()
+    if model is None:
+        return {"backend": "opencv", "yolo": False, "reason": "backend YOLO tidak tersedia"}
+    runtime = getattr(model, "backend", "pytorch")
     return {"backend": "yolo", "yolo": True, "runtime": runtime, "weights": str(path)}
 
 
@@ -247,6 +380,23 @@ def _box_geometry_ok(
     return 1.20 <= aspect <= 5.00 and area_ratio <= MAX_BOX_AREA_RATIO
 
 
+def _predict_boxes(
+    model: Any, image: Any, conf: float = DEFAULT_CONF
+) -> list[tuple[float, float, float, float, float, int]]:
+    """Seragamkan keluaran kotak dari :class:`_OnnxYoloRunner` maupun Ultralytics YOLO."""
+    if isinstance(model, _OnnxYoloRunner):
+        return model.predict_boxes(image, conf=conf)
+    result = model.predict(image, conf=conf, verbose=False)[0]
+    if result.boxes is None:
+        return []
+    out: list[tuple[float, float, float, float, float, int]] = []
+    for box in result.boxes:
+        class_id = int(box.cls[0]) if getattr(box, "cls", None) is not None else 0
+        x1, y1, x2, y2 = (float(v) for v in box.xyxy[0].tolist())
+        out.append((x1, y1, x2, y2, float(box.conf[0]), class_id))
+    return out
+
+
 def detect(image: Any, max_candidates: int = 4) -> list[Detection]:
     """Deteksi plat dengan YOLO; kontrak sama dengan pipeline klasik.
 
@@ -257,17 +407,15 @@ def detect(image: Any, max_candidates: int = 4) -> list[Detection]:
     if model is None:
         return []
 
-    result = model.predict(image, conf=DEFAULT_CONF, verbose=False)[0]
-    if result.boxes is None:
+    raw_boxes = _predict_boxes(model, image, conf=DEFAULT_CONF)
+    if not raw_boxes:
         return []
 
     candidates: list[tuple[float, Detection]] = []
-    for box in result.boxes:
-        class_id = int(box.cls[0]) if getattr(box, "cls", None) is not None else 0
+    for x1, y1, x2, y2, det_conf, class_id in raw_boxes:
         # Dataset prototype hanya memiliki satu kelas: number-plate.
         if class_id != 0:
             continue
-        x1, y1, x2, y2 = (float(v) for v in box.xyxy[0].tolist())
         if not _box_geometry_ok(x1, y1, x2, y2, image.shape):
             continue
         quad = order_points([[x1, y1], [x2, y1], [x2, y2], [x1, y2]])
@@ -276,7 +424,6 @@ def detect(image: Any, max_candidates: int = 4) -> list[Detection]:
             continue
         border = plate_border_score(crop)  # bingkai plat pada box penuh, sebelum snap
         texture_ok = plate_texture_ok(crop)
-        det_conf = float(box.conf[0])
         # Persempit vertikal ke pita teks terlebih dahulu (keep_horizontal=True)
         # agar bingkai hitam holder plat di atas/bawah tidak merusak hitungan glyph.
         text_band, _ = snap_to_text_band(crop, keep_horizontal=True)
