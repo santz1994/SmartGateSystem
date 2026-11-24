@@ -192,6 +192,10 @@ def _prune_snapshots() -> None:
 
 # --- Pemrosesan satu frame ----------------------------------------------------
 
+MAX_OCR_CALLS_FAST = 2
+MAX_OCR_CALLS_FULL = 6
+
+
 def _process_frame(
     label: str,
     image: Any,
@@ -202,7 +206,11 @@ def _process_frame(
     sticker_enabled: bool = True,
     fast: bool = False,
 ) -> FrameResult:
-    stages = pipeline.preprocess(image, full=not fast)
+    # PERF-3: Lewati bilateralFilter + CLAHE frame penuh pada jalur normal;
+    # tahap penuh hanya dihitung bila SGS_SAVE_PIPELINE_STAGES=1 diaktifkan.
+    stages = pipeline.preprocess(
+        image, full=bool(not fast and config.SAVE_PIPELINE_STAGES)
+    )
     gray = stages["gray"]
     sharpness = pipeline.laplacian_variance(gray)
 
@@ -217,12 +225,10 @@ def _process_frame(
         # gerbang pemecah seri — blob teks/video besar tidak boleh mengambil
         # slot OCR dari plat asli.
         plates = sorted(plates, key=lambda d: pipeline.candidate_score(d, image.shape), reverse=True)[: (1 if fast else 3)]
-        # Kandidat penyelamat sapuan pita teks — foto cetak/layar (halftone,
-        # moiré) dapat membuat detektor kosong/fragmen. Ditaruh paling akhir:
-        # hanya dibaca bila kandidat sebelumnya tidak menghasilkan teks NRKB.
-        rescue = pipeline.frame_text_candidate(image)
-        if rescue is not None:
-            plates.append(rescue)
+        if not plates:
+            rescue = pipeline.frame_text_candidate(image)
+            if rescue is not None:
+                plates.append(rescue)
     stickers = pipeline.detect_stickers(image) if sticker_enabled and not fast else []
     # Blok warna jenuh di latar (video/layar) bukan stiker: buang yang gagal
     # terdekode agar kotak deteksi tidak "sibuk" menempel pada distraktor.
@@ -230,31 +236,23 @@ def _process_frame(
 
     result = FrameResult(label=label, cctv_role=cctv_role, sharpness=sharpness, stages=stages)
 
-    if plates:
-        # Evaluasi semua kandidat terbatas. Kandidat terdekat tidak selalu
-        # merupakan plat: pada motor, area jalan/roda di bawah frame dapat
-        # terlihat seperti papan terang. Hasil OCR berformat NRKB harus menang
-        # sebelum kedekatan dipakai sebagai pemecah seri.
-        # Baca dari raw_crop resolusi penuh: pada crop 64 px huruf tipis
-        # (prefix "H") hilang dan yang tersisa justru stiker tanggal. Tampilan
-        # cadangan (crop bermargin & crop detektor) dibaca sekali bila snap
-        # pita teks memotong terlalu rapat.
-        readings = []
+    if plate_enabled and plates:
+        # Evaluasi semua kandidat terbatas dengan anggaran keras OCR per frame
+        # (PERF-2: maks 2 panggilan di mode cepat, 6 di mode penuh).
+        readings: list[tuple[pipeline.Detection, str, float, str]] = []
         stop = False
+        ocr_calls = 0
+        max_ocr_calls = MAX_OCR_CALLS_FAST if fast else MAX_OCR_CALLS_FULL
 
-        def strong(result: tuple[str, float, str]) -> bool:
-            text, confidence, _ = result
+        def strong(res: tuple[str, float, str]) -> bool:
+            text, confidence, _ = res
             return ocr._looks_like_plate(text) and confidence >= 0.80 and len(text) >= 6
 
-        for index, det in enumerate(plates):
-            if stop:
-                break
+        def eval_candidate(index: int, det: pipeline.Detection) -> None:
+            nonlocal stop, ocr_calls
             raw = det.meta.get("raw_crop")
             primary = raw if getattr(raw, "size", 0) else det.crop
             vehicle_class = det.meta.get("vehicle_class")
-            # Urutan view: crop tumbuh ke baris tinta plat (paling berhasil
-            # empiris, satu kali baca sering langsung tuntas) -> robust ladder
-            # pada crop utama -> view cadangan.
             views: list[tuple[Any, bool]] = [
                 (pipeline.grow_to_text_line(image, det.bbox), False),
                 (primary, True),
@@ -262,7 +260,10 @@ def _process_frame(
             for view in (det.meta.get("full_crop"), det.crop):
                 if getattr(view, "size", 0) and view is not primary:
                     views.append((view, False))
-            for view, use_robust in views:
+            for view_idx, (view, use_robust) in enumerate(views):
+                if stop or ocr_calls >= max_ocr_calls:
+                    break
+                ocr_calls += 1
                 reading = (
                     ocr.read_plate_robust(view, vehicle_class, fast=fast)
                     if use_robust
@@ -272,16 +273,18 @@ def _process_frame(
                 if strong(reading):
                     stop = True
                     break
-            if stop or index > 1:
-                continue
-            # Pemulihan mahal (pita beririsan) hanya kandidat teratas & bila
-            # belum ada bacaan berformat golongan NRKB kendaraan.
+                # PERF-2: Kandidat sampah (teks kosong & conf < 0.20 pada view
+                # pertama) tidak perlu menghabiskan sisa view cadangan.
+                if view_idx == 0 and not reading[0] and reading[1] < 0.20 and len(plates) > 1:
+                    break
+            if stop or index > 1 or ocr_calls >= max_ocr_calls:
+                return
             if any(
                 ocr._looks_like_plate(r[1]) and ocr.number_fits_class(r[1], vehicle_class)
                 for r in readings
                 if r[0] is det
             ):
-                continue
+                return
             x1, y1, x2, y2 = (int(v) for v in det.bbox)
             pad_x, pad_y = int((x2 - x1) * 0.25), max(int((y2 - y1) * 0.6), 20)
             wide = image[
@@ -289,10 +292,33 @@ def _process_frame(
                 max(x1 - pad_x, 0) : min(x2 + pad_x, image.shape[1]),
             ]
             for band in ocr.band_crops(wide, count=2):
+                if ocr_calls >= max_ocr_calls:
+                    break
+                ocr_calls += 1
                 reading = ocr.read_plate(band, fast=fast)
                 readings.append((det, *reading))
                 if strong(reading):
+                    stop = True
                     break
+
+        for index, det in enumerate(plates):
+            if stop or ocr_calls >= max_ocr_calls:
+                break
+            eval_candidate(index, det)
+
+        # PERF-3: Lazy rescue candidate — frame_text_candidate hanya dihitung
+        # bila detektor utama belum menghasilkan satupun bacaan berformat NRKB.
+        if (
+            not fast
+            and ocr_calls < max_ocr_calls
+            and not any(ocr._looks_like_plate(r[1]) for r in readings)
+            and not any(d.meta.get("rescue") for d in plates)
+        ):
+            rescue = pipeline.frame_text_candidate(image)
+            if rescue is not None:
+                plates.append(rescue)
+                eval_candidate(len(plates) - 1, rescue)
+
         # Kandidat penyelamat tidak membawa golongan dari deteksi — turunkan
         # dari nomor hasil baca, agar tiebreak pool tidak kalah dari kandidat
         # sampah yang kebetulan membawa meta golongan.
@@ -343,7 +369,7 @@ def _process_frame(
 
     result.detections = plates + stickers
     detection_conf = max((d.confidence for d in result.detections), default=0.0)
-    result.frame_score = pipeline.frame_score(image, detection_conf)
+    result.frame_score = pipeline.frame_score(image, detection_conf, sharpness=sharpness)
     if plate_enabled and not fast and (
         not result.plate_text
         or result.plate_confidence < config.DEFAULTS["plat_confidence_threshold"]
@@ -519,8 +545,18 @@ def evaluate(
 
 
 def _save_stages(frame: FrameResult, session_id: str) -> None:
-    """Simpan tiap tahap pipeline sebagai PNG — bahan visualisasi laporan."""
-    for name in ("original", "clahe", "denoise", "gray", "plate_raw", "plate_crop", "plate_enhanced", "sticker_crop"):
+    """Simpan tahap pipeline — untuk efisiensi I/O (PERF-4), pada mode default
+    hanya ``is_best_frame`` yang menyimpan crop bukti, kecuali
+    ``SGS_SAVE_PIPELINE_STAGES=1`` diaktifkan untuk laporan akademik penuh.
+    """
+    if not config.SAVE_PIPELINE_STAGES and not frame.is_best_frame:
+        return
+    names = (
+        ("original", "clahe", "denoise", "gray", "plate_raw", "plate_crop", "plate_enhanced", "sticker_crop")
+        if config.SAVE_PIPELINE_STAGES
+        else ("plate_raw", "plate_crop", "plate_enhanced", "sticker_crop")
+    )
+    for name in names:
         image = frame.stages.get(name)
         if image is None or getattr(image, "size", 0) == 0:
             continue
@@ -539,7 +575,8 @@ def _save_failed_diagnostics(frame: FrameResult, session_id: str) -> None:
     source = images["frame"]
     if source is None or getattr(source, "size", 0) == 0:
         return
-    fingerprint = hashlib.sha1(source.tobytes()).hexdigest()
+    np = pipeline._np()
+    fingerprint = hashlib.sha1(np.ascontiguousarray(source)).hexdigest()
     now = time.monotonic()
     if _DIAGNOSTIC_LAST_SAVED is not None:
         saved_at, saved_fingerprint = _DIAGNOSTIC_LAST_SAVED

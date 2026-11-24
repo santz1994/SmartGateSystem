@@ -7,8 +7,10 @@ tiap 3 detik. Untuk prototipe ini cukup, dan menghilangkan satu dependensi.
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +30,36 @@ from . import auth, config, db, detect_yolo, fusion, ocr, pipeline, service, sim
 
 VEHICLE_TYPES = ("car", "motorcycle", "truck", "custom")
 OWNER_TYPES = ("warga", "karyawan", "tamu")
+
+# Rate-limiting login berbasis memori per IP (SEC-1): maks 5 gagal per 60 detik.
+LOGIN_MAX_FAILURES = 5
+LOGIN_WINDOW_SECONDS = 60.0
+_LOGIN_FAILURES: dict[str, list[float]] = {}
+_PLATE_INPUT_RE = re.compile(r"^[A-Z0-9 ]+$")
+
+
+def _login_rate_limited(remote_addr: str) -> bool:
+    """True bila IP telah mencapai batas gagal login dalam jendela aktif."""
+    now = time.monotonic()
+    key = remote_addr or "local"
+    recent = [ts for ts in _LOGIN_FAILURES.get(key, []) if now - ts < LOGIN_WINDOW_SECONDS]
+    if recent:
+        _LOGIN_FAILURES[key] = recent
+    else:
+        _LOGIN_FAILURES.pop(key, None)
+    return len(recent) >= LOGIN_MAX_FAILURES
+
+
+def _record_login_failure(remote_addr: str) -> None:
+    now = time.monotonic()
+    key = remote_addr or "local"
+    recent = [ts for ts in _LOGIN_FAILURES.get(key, []) if now - ts < LOGIN_WINDOW_SECONDS]
+    recent.append(now)
+    _LOGIN_FAILURES[key] = recent
+
+
+def _clear_login_failures(remote_addr: str) -> None:
+    _LOGIN_FAILURES.pop(remote_addr or "local", None)
 
 # Run training YOLO — dipantau halaman /training. Pilih run terbaru otomatis
 # (Colab V5 pakai runs/detect/smartgate-colab-v5, training lama runs/detect/runs/detect/smartgate).
@@ -103,10 +135,21 @@ def create_app() -> Flask:
 
     @app.post("/login")
     def login_submit() -> Any:
+        client_ip = request.remote_addr or "local"
+        if _login_rate_limited(client_ip):
+            return (
+                render_template(
+                    "login.html",
+                    error="Terlalu banyak percobaan login gagal. Silakan tunggu 60 detik sebelum mencoba lagi.",
+                ),
+                429,
+            )
         try:
             auth.login((request.form.get("username") or "").strip(), request.form.get("password") or "")
         except ValueError as exc:
+            _record_login_failure(client_ip)
             return render_template("login.html", error=str(exc)), 401
+        _clear_login_failures(client_ip)
         target = request.args.get("next") or ""
         return redirect(target if target.startswith("/") and not target.startswith("//") else url_for("dashboard"))
 
@@ -446,8 +489,14 @@ def training_status() -> dict[str, Any]:
     }
 
 def _validate_vehicle(fields: dict[str, Any]) -> str | None:
-    if not fields["plate_number"]:
+    plate = fields.get("plate_number") or ""
+    if not plate:
         return "Plat nomor wajib diisi."
+    if len(plate) > 16 or not _PLATE_INPUT_RE.fullmatch(plate):
+        return "Plat nomor maksimal 16 karakter dan hanya boleh berisi huruf, angka, atau spasi."
+    sticker_code = fields.get("sticker_code")
+    if sticker_code and len(str(sticker_code)) > 64:
+        return "Kode stiker maksimal 64 karakter."
     if not fields["owner_name"]:
         return "Nama pemilik wajib diisi."
     if fields["owner_type"] not in OWNER_TYPES:

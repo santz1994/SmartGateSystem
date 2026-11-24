@@ -109,9 +109,9 @@ dikalibrasi per kamera. Kandidat tunggal tetap dapat diproses untuk foto manual.
 
 Urutan pemrosesan crop dapat mencakup:
 
-1. koreksi perspektif/penyempitan ke pita teks;
+1. koreksi perspektif/penyempitan ke pita teks (`snap_to_text_band` dengan `keep_horizontal=True` pada bbox YOLO agar karakter tepi kiri/kanan tidak terpotong oleh ambang Otsu global, serta lokalisasi sub-window Otsu pada `grow_to_text_line` agar ~20× lebih cepat di CPU);
 2. deteksi highlight dan inpainting `deglare`;
-3. grayscale, adaptive threshold, morphology close;
+3. grayscale, adaptive threshold, morphology close, serta deteksi polaritas otomatis (`_ink_mask`: membalikkan mask `255 - binary` bila proporsi piksel aktif > 0,55 sehingga mendukung plat dasar putih, kuning, hijau, merah, maupun plat lama warna dasar hitam bertulisan putih);
 4. CLAHE untuk kontras lokal;
 5. median blur 3×3 untuk meredam moiré/pola piksel layar monitor sebelum
    penajaman;
@@ -120,9 +120,8 @@ Urutan pemrosesan crop dapat mencakup:
    huruf (`Y`, `G`, `4`) yang samar tidak terpotong lalu salah baca
    (mis. `Y` terpotong → terbaca `1` → dinormalisasi `I`);
 8. retry terbatas (`deglare`, adaptive threshold) sampai hasil valid **dan**
-   keyakinan ≥ 0,80 — retry juga dipicu bila hasil valid-struktur tetapi
-   keyakinan rendah, karena kesalahan baca akibat moiré sering tetap
-   "terlihat seperti plat" (mis. `BB1999OGI`).
+   keyakinan ≥ 0,80 — dengan penggabungan otomatis baris atas (`prefix + nomor`) dan baris bawah (`seri huruf`) pada plat 2 baris (truk/bus) tanpa *early-exit* prematur pada baris pertama.
+9. pengendalian sumber daya CPU & RAM: pencegahan *dual-runtime memory bloat* (`SGS_ENABLE_SECONDARY_OCR=0` default, warmup hanya `_paddle_rec_model`), anggaran keras panggilan OCR per frame (`MAX_OCR_CALLS_FAST = 2`, `MAX_OCR_CALLS_FULL = 6`), penghapusan `zoom 2x` ganda, dan hashing `SHA-1` *zero-copy* (`np.ascontiguousarray`).
 
 Pantulan monitor berbeda dari pantulan kendaraan nyata. Karena itu hasil dari
 foto yang menampilkan plat pada layar monitor harus ditandai sebagai kasus
@@ -142,17 +141,12 @@ Crop hasil YOLO diberi padding agar karakter suffix seperti `UL` tidak terpotong
 EasyOCR juga memakai `paragraph`, `width_ths`, dan `link_threshold` agar jarak
 antara nomor dan suffix tetap digabung.
 
-Struktur yang divalidasi:
+Struktur yang divalidasi mengacu pada **Peraturan Kepolisian (Perpol) Nomor 7 Tahun 2021** tentang Registrasi dan Identifikasi Kendaraan Bermotor:
 
-- prefix wilayah 1--3 huruf;
-- nomor urut 1--4 angka, tidak diawali angka `0`;
-- suffix 0--3 huruf;
-- karakter ambigu dikoreksi berdasarkan posisi, bukan penggantian global:
-  `B/8`, `6/G`, `1/I`, `O/0`, `I/1`, `L/1`, `S/5`, `T/7`, `A/4`, `D/0`, `V/U`, `W/VV`, `X/XX`, `Z/2`;
-- koreksi blok prefix (V4 parser): `0/1/O/I/L` → `D`, `8` → `B`, dengan bonus
-  skor untuk kode wilayah valid (`VALID_PREFIXES`) sehingga plat Makassar yang
-  terbaca `005877US` dikoreksi menjadi `DD5877US`; blok angka diawali `0`
-  dikenai penalti karena NRKB tidak pernah diawali `0`.
+- **Pola 3 blok pasti**: prefix kode wilayah **1--2 alfabet** (`[A]` atau `[AA]` sesuai `VALID_PREFIXES`, termasuk kode wilayah baru `PG`, `PS`, `PT`, `PY`), nomor urut registrasi **1--4 digit angka** (tidak diawali angka `0`), dan suffix seri akhir **1--3 alfabet** (`[A]`, `[AA]`, `[AAA]` sesuai wilayah Polda, mis. `[A] [9999] [AAA]`, `[A] [9999] [AA]`, `[A] [9999] [A]`, `[AA] [9999] [A]`, `[AA] [9999] [AA]`, `[AA] [9999] [AAA]`);
+- **Pemisahan mutlak alfabet vs angka**: **tidak ada angka pada blok alfabet dan tidak ada alfabet pada blok angka**; karakter ambigu dikoreksi berdasarkan posisi blok (`_AMBIGUOUS_ALPHA` dengan prior `(0.75, 0.55)` vs `_AMBIGUOUS_DIGIT` dengan prior `(0.45, 0.80)` agar digit terakhir pada plat tanpa suffix seperti `DD1407` atau `DD2270` tidak berubah menjadi huruf `DD140T` atau `DD227O`). Koreksi prefix `_fix_prefix()` menjaga kode wilayah yang sudah valid (sehingga plat Surabaya `L`, Aceh `BL`, dan Sulut `DL` tidak pernah terubah menjadi `D`, `BD`, `DD`), sekaligus menyelamatkan awalan angka ambigu di `best_plate_text()` (`005877US` → `DD5877US`, `81234XYZ` → `B1234XYZ`);
+- **4 digit angka di bawah TNKB (`MMYY`)**: merupakan masa berlaku TNKB (2 digit awal = bulan `01--12`, 2 digit belakang = tahun); dipisahkan oleh `text_rows` dan filter `_DATE_LIKE` (baik dengan pemisah maupun 4 digit rapat seperti `0425`, `1228`) agar tidak tergabung ke dalam nomor plat;
+- **Warna dasar (Pasal 45 Perpol 7/2021) & patokan ukuran pada gambar bergerak**: mendukung TNKB Putih (tulisan hitam), Kuning (tulisan hitam), Merah (tulisan putih), Hijau (FTZ), lis biru (EV), serta plat lama Hitam (tulisan putih). Karena citra diambil dari kendaraan bergerak (perspektif/jarak berubah), ukuran & rasio fisik plat dipakai sebagai patokan luwes (*soft prior*) bersama golongan nomor urut.
 
 Aturan di atas bukan sekadar pemeringkat: hasil OCR yang melanggar struktur
 NRKB **ditolak keras** dan dianggap tidak terbaca (teks mentah tetap disimpan
@@ -160,9 +154,9 @@ di `plate_raw_text` untuk audit), confidence tidak ikut dihitung ke skor fusi,
 dan alasan `OCR_FAILED` menjelaskan pelanggaran format. Voting antar-frame juga
 membuang suara yang melanggar struktur sebelum penghitungan suara.
 
-Rentang nomor kendaraan (1--1999 mobil penumpang, 2000--6999 sepeda motor,
-7000--7999 bus, 8000--8999 barang, 9000--9999 khusus) hanya menjadi petunjuk
-tambahan. Sumber referensi: [Bapenda Jawa Barat](https://bapenda.jabarprov.go.id/2017/10/24/kenali-penomoran-kendaraan-bermotor/).
+Alokasi nomor urut kendaraan berdasarkan **Perpol Nomor 7 Tahun 2021**:
+- **Wilayah Umum (Nasional)**: `1--1999` Mobil Penumpang/Pribadi, `2000--6999` Sepeda Motor, `7000--7999` Mobil Bus, `8000--8999` Mobil Barang, `9000--9999` Kendaraan Khusus.
+- **Wilayah Polda Metro Jaya (`B`)**: `1--2999` Mobil Penumpang/Pribadi, `3000--6999` Sepeda Motor, `7000--7999` Mobil Bus, `8000--8999` Mobil Barang, `9000--9999` Kendaraan Khusus.
 
 ### 5.4 Stiker (rencana pengembangan)
 
@@ -231,8 +225,27 @@ Training berhenti otomatis melalui dua mekanisme: `patience` (tidak ada
 perbaikan mAP50 selama N epoch) dan `--target-map50` (default `0,98`,
 nonaktifkan dengan `0`) yang memaksa training berhenti begitu target mAP50
 tercapai — callback `on_fit_epoch_end` yang sama dipasang di notebook
-`plat-nomor/a.ipynb` (`TARGET_MAP50 = 0.98`) sehingga waktu komputasi
-GPU/Colab tidak terbuang untuk epoch yang tidak perlu.
+`plat-nomor/a_YOLOv11n.ipynb` dan `plat-nomor/a_YOLOv8n.ipynb` (`TARGET_MAP50 = 0.98`)
+sehingga waktu komputasi GPU/Colab tidak terbuang untuk epoch yang tidak perlu.
+
+Untuk mencegah **degradasi model** (*model degradation* akibat ketimpangan split
+`3.982 train : 84 val` satu domain dan kenaikan `val/box_loss` pada paruh akhir
+epoch), pipeline pelatihan Google Colab menerapkan **5-Fold Stratified Group
+Cross-Validation** (`tools/prepare_kfold.py`) dan regularisasi anti-degradasi
+(`ANTI_DEGRADATION_HYPS` di `train_yolo.py`):
+- **Anti-leakage visual berbasis Perceptual Hash (`dHash` 64-bit) + SHA-256**:
+  mengelompokkan frame CCTV berurutan atau kompresi ulang dari kendaraan yang
+  sama (jarak Hamming $\le 4$) ke dalam satu `group_id` agar selalu berada di
+  fold yang sama (*GroupKFold*).
+- **Stratifikasi multi-dimensi ($K=5$)**: menyeimbangkan proporsi sumber domain
+  (`orig`, `rf`, `kg`, `mg`, `bg`), skala luas bbox (`bg_empty`, `small`,
+  `medium`, `large`), dan rasio aspek (`one_row` vs `two_row`) ke dalam 5
+  manifest portabel `folds/data_fold_0.yaml` s.d. `folds/data_fold_4.yaml`
+  (~3.253 `train` : ~813 `val` multi-domain per fold).
+- **Regularisasi & augmentasi spesifik kamera gate**: `weight_decay=0.001`,
+  `dropout=0.10`, `cos_lr=True`, `degrees=7.0`, `shear=2.5`,
+  `perspective=0.0004`, `scale=0.45`, `erasing=0.25`, `close_mosaic=15`, dan
+  **`fliplr=0.0`** (wajib `0.0` agar urutan karakter plat tidak terbalik cermin).
 
 Run **V6 `smartgate-colab-v6-yolo11n`** (Colab T4, 50 epoch, dataset gabungan
 final 3.982 gambar) adalah run aktif dengan hasil terbaik sejauh ini:
@@ -278,11 +291,14 @@ plate accuracy, character accuracy/CER, false accept rate, serta latency
 p95. Target akademik dapat digunakan sebagai sasaran eksperimen, bukan klaim
 hasil sebelum diuji pada dataset terpisah.
 
-Uji manual yang sudah dicakup meliputi normalisasi NRKB, pemilihan kandidat
-terdekat, ROI, voting OCR, retry enhancement, fusi, dan alur end-to-end.
-Regresi otomatis terkunci di `tests/test_pipeline.py` (assert tanpa framework,
-102 pemeriksaan): aturan NRKB, voting, moiré monitor (`test_monitor_moire`),
-dan distraktor layar/video (`test_distractors`).
+Uji manual yang sudah dicakup meliputi normalisasi NRKB (Perpol No. 7 Tahun
+2021), pemilihan kandidat terdekat, ROI, voting OCR, retry enhancement,
+penggabungan plat 2 baris, pembacaan plat hitam bertulisan putih, efisiensi
+CPU/RAM, pembagian 5-Fold Stratified Group Cross-Validation (`dHash` 64-bit),
+keamanan sesi/rate-limiting, fusi, dan alur end-to-end. Regresi otomatis
+terkunci di `tests/test_pipeline.py` (assert tanpa framework, **138+
+pemeriksaan**): aturan NRKB Perpol 7/2021, voting, moiré monitor
+(`test_monitor_moire`), dan distraktor layar/video (`test_distractors`).
 Kasus seperti `L1257PR` berhasil dibantu penyempitan pita teks dan voting.
 Kasus pantulan layar seperti `AA5045YN` masih tidak stabil karena detektor
 klasik dapat memecah plat menjadi fragmen.

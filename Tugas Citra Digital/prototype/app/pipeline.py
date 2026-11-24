@@ -9,6 +9,7 @@ meng-cache modul sehingga pemanggilan berikutnya hanya lookup dict.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
 
 from . import config, vehicles
@@ -27,15 +28,17 @@ PLATE_MIN_CONTRAST = 28.0  # std dev citra abu-abu (diturunkan untuk plat redup/
 PLATE_ASPECT_IDEAL = 3.0  # fallback skor bila tahap OCR dimatikan
 
 
+@lru_cache(maxsize=1)
 def _cv2():
     import cv2
 
     # Crop kecil yang diproses di sini tidak diuntungkan pool thread besar —
-    # batasi agar OpenCV tidak berebut CPU dengan PaddleOCR/PyTorch.
+    # batasi sekali saat inisialisasi (PERF-6) agar OpenCV tidak berebut CPU.
     cv2.setNumThreads(config.CPU_THREADS)
     return cv2
 
 
+@lru_cache(maxsize=1)
 def _np():
     import numpy as np
 
@@ -242,8 +245,12 @@ def grow_to_text_line(image: Any, bbox: tuple[int, int, int, int]) -> Any:
     potongan. Tumbuh dulu vertikal ke pita tinta, lalu horizontal ke seluruh
     baris — baris 'H 6249 NB' utuh kembali terbaca. Batas jangkauan 1x tinggi /
     1,5x lebar kotak agar tidak menelan seluruh frame.
+
+    PERF-3: Binarisasi Otsu dilakukan pada sub-window lokal di sekitar ``bbox``
+    (bukan seluruh frame HD) sehingga ~20x lebih cepat di CPU sekaligus menjaga
+    ambang Otsu tidak dibiaskan oleh latar aspal/bodi di luar area plat.
     """
-    cv2, np = _cv2(), _np()
+    np = _np()
     h_frame, w_frame = image.shape[:2]
     x1, y1, x2, y2 = (int(v) for v in bbox)
     x1, y1 = max(x1, 0), max(y1, 0)
@@ -251,8 +258,16 @@ def grow_to_text_line(image: Any, bbox: tuple[int, int, int, int]) -> Any:
     if x2 <= x1 or y2 <= y1:
         return image[y1:y2, x1:x2].copy()
 
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    box_h, box_w = y2 - y1, x2 - x1
+    reach_y = max(box_h, 4)
+    reach_x = max(int(box_w * 1.5), 8)
+    wx1, wy1 = max(x1 - reach_x, 0), max(y1 - reach_y, 0)
+    wx2, wy2 = min(x2 + reach_x, w_frame), min(y2 + reach_y, h_frame)
+    window = image[wy1:wy2, wx1:wx2]
+    binary = _ink_mask(window)
+
+    lx1, ly1 = x1 - wx1, y1 - wy1
+    lx2, ly2 = x2 - wx1, y2 - wy1
 
     def grow(profile: Any, lo: int, hi: int, reach: int, gap: int) -> tuple[int, int]:
         closed = np.convolve((profile > 0).astype(np.uint8), np.ones(max(gap, 2), np.uint8), mode="same") > 0
@@ -262,11 +277,11 @@ def grow_to_text_line(image: Any, bbox: tuple[int, int, int, int]) -> Any:
             return lo, hi
         return window_lo + int(idx.min()), window_lo + int(idx.max()) + 1
 
-    row_ink = (binary[:, x1:x2] > 0).sum(axis=1)
-    y1, y2 = grow(row_ink, y1, y2, max(y2 - y1, 4), max(int((y2 - y1) * 0.3), 4))
-    col_ink = (binary[y1:y2, :] > 0).sum(axis=0)
-    x1, x2 = grow(col_ink, x1, x2, int((x2 - x1) * 1.5), max(y2 - y1, 8))
-    return image[y1:y2, x1:x2].copy()
+    row_ink = (binary[:, lx1:lx2] > 0).sum(axis=1)
+    ly1, ly2 = grow(row_ink, ly1, ly2, reach_y, max(int(box_h * 0.3), 4))
+    col_ink = (binary[ly1:ly2, :] > 0).sum(axis=0)
+    lx1, lx2 = grow(col_ink, lx1, lx2, reach_x, max(ly2 - ly1, 8))
+    return window[ly1:ly2, lx1:lx2].copy()
 
 def filter_gate_zone(
     detections: list[Detection],
@@ -424,7 +439,12 @@ def _iou(a: Any, b: Any) -> float:
 
 def _ink_mask(crop: Any, trim_x: float = 0.0, trim_y: float = 0.0) -> Any:
     """Mask tinta karakter. Tepi papan (border hitam) dibuang agar tidak
-    dihitung sebagai karakter / baris."""
+    dihitung sebagai karakter / baris.
+
+    Otomatis mendeteksi polaritas plat (Perpol 7/2021): plat dasar putih/kuning/
+    hijau bertulisan hitam maupun plat hitam/merah bertulisan putih sama-sama
+    menghasilkan mask dengan piksel karakter = 255 dan latar = 0.
+    """
     cv2 = _cv2()
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
@@ -432,6 +452,8 @@ def _ink_mask(crop: Any, trim_x: float = 0.0, trim_y: float = 0.0) -> Any:
     ty, tx = int(h * trim_y), int(w * trim_x)
     if h > 2 * ty and w > 2 * tx:
         binary = binary[ty : h - ty, tx : w - tx]
+    if binary.size and float((binary > 0).mean()) > 0.55:
+        binary = 255 - binary
     return binary
 
 def ink_glyph_count(crop: Any) -> int:
@@ -526,12 +548,17 @@ def text_rows(crop: Any, min_height_frac: float = 0.10) -> list[Any]:
         return [crop]
     return [crop[a:b] for a, b in bands[:4]]
 
-def snap_to_text_band(crop: Any) -> tuple[Any, tuple[int, int, int, int]]:
+def snap_to_text_band(
+    crop: Any, *, keep_horizontal: bool = False
+) -> tuple[Any, tuple[int, int, int, int]]:
     """Persempit kandidat ke pita teks plat, buang konteks bodi kendaraan.
 
     Kandidat klasik sering berupa blob besar (lampu + logo + plat) karena ambang
     menggabungkan area terang. Pita yang dipilih = baris dengan run karakter
     sempit terbanyak (deretan huruf/angka), bukan blok warna/teks kecil.
+    ``keep_horizontal=True`` menjaga batas kiri-kanan asli (untuk bbox YOLO
+    yang sudah akurat secara horizontal) agar huruf tepi yang terkena bayangan
+    miring tidak terpotong oleh ambang Otsu global.
     Kembalikan ``(crop, (x1, y1, x2, y2))`` dengan kotak pada ruang crop awal.
     """
     cv2, np = _cv2(), _np()
@@ -576,13 +603,16 @@ def snap_to_text_band(crop: Any) -> tuple[Any, tuple[int, int, int, int]]:
     keep = [(a, b) for runs, height, a, b in scored if height >= 0.5 * best[1] and runs >= 0.4 * best[0]]
     y1 = max(min(a for a, _ in keep) - int(h * 0.05), 0)
     y2 = min(max(b for _, b in keep) + int(h * 0.05), h)
-    sub = binary[y1:y2]
-    cols = np.nonzero((sub > 0).sum(axis=0) > max(1, int(sub.shape[0] * 0.05)))[0]
-    if cols.size:
-        margin = int(w * 0.04)
-        x1, x2 = max(int(cols[0]) - margin, 0), min(int(cols[-1]) + margin, w)
-    else:
+    if keep_horizontal:
         x1, x2 = 0, w
+    else:
+        sub = binary[y1:y2]
+        cols = np.nonzero((sub > 0).sum(axis=0) > max(1, int(sub.shape[0] * 0.05)))[0]
+        if cols.size:
+            margin = int(w * 0.04)
+            x1, x2 = max(int(cols[0]) - margin, 0), min(int(cols[-1]) + margin, w)
+        else:
+            x1, x2 = 0, w
     snapped = crop[y1:y2, x1:x2]
     if not snapped.size:
         return crop, (0, 0, w, h)
@@ -864,14 +894,15 @@ def detect_plates_classic(image: Any, max_candidates: int = 8) -> list[Detection
             _, binary = cv2.threshold(closed, threshold_value, 255, flag)
             candidates.extend(_candidates_from_binary(binary, frame_area))
 
-        # Adaptive threshold path: menangani plat putih pada bodi terang (Otsu gagal)
-        for bs, C in ((21, -5), (25, -5)):
-            binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, bs, C)
-            candidates.extend(_candidates_from_binary(binary, frame_area))
+    # Adaptive threshold path (PERF-7: dihitung sekali di luar loop kernel_w
+    # karena memproses `gray`, bukan `closed`): menangani plat putih pada bodi terang.
+    for bs, C in ((21, -5), (25, -5)):
+        binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, bs, C)
+        candidates.extend(_candidates_from_binary(binary, frame_area))
 
-        candidates.sort(key=lambda item: item[0], reverse=True)
-
-    candidates.extend(_merge_fragments(candidates))
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    # Batasi input _merge_fragments ke 30 kandidat teratas agar tidak memicu O(N^3) (PERF-7).
+    candidates.extend(_merge_fragments(candidates[:30]))
     candidates.sort(key=lambda item: item[0], reverse=True)
 
     detections: list[Detection] = []
@@ -986,11 +1017,19 @@ def _detect_color_patches(image: Any, limit: int) -> list[Detection]:
 
 # --- Best frame ---------------------------------------------------------------
 
-def frame_score(image: Any, detection_confidence: float) -> float:
-    """Skor pemilihan frame: ketajaman x keyakinan deteksi."""
-    cv2 = _cv2()
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    return laplacian_variance(gray) * max(detection_confidence, 0.0)
+def frame_score(
+    image: Any, detection_confidence: float, *, sharpness: float | None = None
+) -> float:
+    """Skor pemilihan frame: ketajaman x keyakinan deteksi.
+
+    PERF-3: ``sharpness`` dapat diteruskan bila sudah dihitung sebelumnya agar
+    ``cvtColor`` + ``laplacian_variance`` tidak dijalankan dua kali per frame.
+    """
+    if sharpness is None:
+        cv2 = _cv2()
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        sharpness = laplacian_variance(gray)
+    return float(sharpness) * max(detection_confidence, 0.0)
 
 
 def annotate(image: Any, detections: list[Detection], label: str = "") -> Any:

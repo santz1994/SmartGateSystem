@@ -50,6 +50,12 @@ FUSION_WEIGHTS = {"plate": 1.0, "sticker": 0.95}
 # Indonesia); EasyOCR jatuh jadi fallback otomatis bila PaddleOCR tidak terpasang
 # atau gagal inisialisasi. Override runtime lewat SGS_OCR_BACKEND.
 OCR_BACKEND = os.getenv("SGS_OCR_BACKEND", "paddleocr").lower()
+# Matikan fallback lintas-framework (PaddleOCR -> EasyOCR/PyTorch) secara default
+# (PERF-1) agar satu bacaan gagal tidak memuat PyTorch ±1,5 GB ke RAM secara permanen.
+ENABLE_SECONDARY_OCR = os.getenv("SGS_ENABLE_SECONDARY_OCR", "0").strip().lower() in {"1", "true", "yes"}
+# Simpan file PNG penuh untuk seluruh tahap pipeline hanya bila diaktifkan (PERF-4);
+# saat default (False), hanya best frame yang disimpan sebagai .jpg cepat.
+SAVE_PIPELINE_STAGES = os.getenv("SGS_SAVE_PIPELINE_STAGES", "0").strip().lower() in {"1", "true", "yes"}
 CLAHE_CLIP_LIMIT = float(os.getenv("SGS_CLAHE_CLIP_LIMIT", str(DEFAULTS["clahe_clip_limit"])))
 DETECTION_GAMMA = float(os.getenv("SGS_DETECTION_GAMMA", "1.15"))
 DETECTION_ROI = tuple(

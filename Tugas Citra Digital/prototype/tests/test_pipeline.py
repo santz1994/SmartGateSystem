@@ -41,6 +41,15 @@ def test_normalize_plate() -> None:
         "B19990G": "B1999OG",  # 0 di suffix
         "DD 1223 MG": "DD1223MG",
         "AA 5045 YN": "AA5045YN",
+        "L 1257 PR": "L1257PR",  # OCR-1: 'L' (Surabaya) tidak boleh berubah jadi 'D'
+        "BL 1234 AB": "BL1234AB",  # OCR-1: 'BL' (Aceh) tidak boleh berubah jadi 'BD'
+        "DL 1234 AB": "DL1234AB",  # OCR-1: 'DL' (Sulut) tidak boleh berubah jadi 'DD'
+        "PG 1234 AA": "PG1234AA",  # OCR-1: kode wilayah baru Papua Pegunungan
+        "005877US": "DD5877US",  # OCR-1/OCR-6: '00' di prefix -> 'DD' (Makassar)
+        "O05877US": "DD5877US",  # 'O0' di prefix -> 'DD'
+        "DD1407": "DD1407",  # OCR-2: digit akhir pada plat tanpa suffix tidak berubah jadi 'DD140T'
+        "DD2270": "DD2270",  # OCR-2: digit akhir '0' tidak berubah jadi 'DD227O'
+        "DD54L1XA": "DD5411XA",  # OCR-7: 'L' di blok angka -> '1'
         "": "",
     }
     for raw, expected in cases.items():
@@ -48,12 +57,16 @@ def test_normalize_plate() -> None:
         check(f"{raw!r} -> {expected}", got == expected, f"(dapat {got!r})")
 
 def test_number_fits_class() -> None:
-    print("number_fits_class (golongan NRKB)")
-    check("5045 = motor", ocr.number_fits_class("AA5045YN", "motorcycle"))
-    check("5045 bukan mobil", not ocr.number_fits_class("AA5045YN", "car"))
-    check("1257 = mobil", ocr.number_fits_class("L1257PR", "car"))
-    check("8223 = barang/truk", ocr.number_fits_class("B8223XY", "truck"))
-    check("9001 = khusus", ocr.number_fits_class("B9001AA", "custom"))
+    print("number_fits_class (golongan NRKB Perpol 7/2021)")
+    check("AA 5045 YN = motor", ocr.number_fits_class("AA5045YN", "motorcycle"))
+    check("AA 5045 YN bukan mobil", not ocr.number_fits_class("AA5045YN", "car"))
+    check("L 1257 PR = mobil", ocr.number_fits_class("L1257PR", "car"))
+    check("B 2287 TXO = mobil Polda Metro Jaya (1-2999)", ocr.number_fits_class("B2287TXO", "car"))
+    check("B 2287 TXO bukan motor Polda Metro Jaya (3000-6999)", not ocr.number_fits_class("B2287TXO", "motorcycle"))
+    check("D 2287 TXO = motor wilayah umum (2000-6999)", ocr.number_fits_class("D2287TXO", "motorcycle"))
+    check("B 7500 XY = bus (7000-7999)", ocr.number_fits_class("B7500XY", "bus"))
+    check("B 8223 XY = barang/truk", ocr.number_fits_class("B8223XY", "truck"))
+    check("B 9001 AA = khusus", ocr.number_fits_class("B9001AA", "custom"))
     check("tanpa kelas = False", not ocr.number_fits_class("L1257PR", None))
 
 
@@ -291,9 +304,17 @@ def test_plate_text_quality_gate() -> None:
         f"(dapat {ocr.best_plate_text(['H', '2518', 'QK', '12 26'])!r})",
     )
     check(
-        "aturan keras: plat diawali huruf — kandidat berawal angka ditolak",
-        ocr.best_plate_text(["04 25"]) == "" and ocr.best_plate_text(["0425", "1226"]) == "",
-        f"(dapat {ocr.best_plate_text(['04 25'])!r} / {ocr.best_plate_text(['0425', '1226'])!r})",
+        "aturan keras: stiker tanggal murni angka ('04 25', '0425', '1228') ditolak",
+        ocr.best_plate_text(["04 25"]) == ""
+        and ocr.best_plate_text(["0425", "1228"]) == ""
+        and ocr.best_plate_text(["H2518OK", "0425"]) == "H2518OK",
+        f"(dapat {ocr.best_plate_text(['04 25'])!r} / {ocr.best_plate_text(['0425', '1228'])!r})",
+    )
+    check(
+        "penyelamatan awalan angka ambigu (005877US -> DD5877US, 81234XYZ -> B1234XYZ)",
+        ocr.best_plate_text(["005877US"]) == "DD5877US"
+        and ocr.best_plate_text(["81234XYZ"]) == "B1234XYZ",
+        f"(dapat {ocr.best_plate_text(['005877US'])!r} / {ocr.best_plate_text(['81234XYZ'])!r})",
     )
     check(
         "kotak stiker tanggal dibuang dari kandidat plat",
@@ -305,6 +326,44 @@ def test_plate_text_quality_gate() -> None:
     check("voting membuang teks melanggar aturan", winner == "B1234XG", f"(dapat {winner!r})")
     winner, _ = fusion.vote_plate([("O02760XCL1029", 0.9)])
     check("voting hanya berisi pelanggar -> tidak terbaca", winner is None)
+
+def test_two_row_and_black_plate() -> None:
+    print("plat 2 baris (truk/bus) & plat hitam teks putih (OCR-3, OCR-4, OCR-5)")
+    cv2, np = pipeline._cv2(), pipeline._np()
+    # Plat 2 baris: baris atas 'B 9012', baris bawah 'QWE'
+    two_row = simulate.render_plate("B 9012 QWE", height=130, rows=2, aspect=1.77)
+    rows = pipeline.text_rows(two_row)
+    check("plat 2 baris terpecah menjadi >= 2 pita baris", len(rows) >= 2, f"(dapat {len(rows)})")
+    text_2row, conf_2row, _ = ocr.read_plate_robust(two_row, "truck")
+    check(
+        "plat 2 baris menggabungkan baris atas + baris bawah (B9012QWE)",
+        text_2row == "B9012QWE",
+        f"(dapat {text_2row!r} conf={conf_2row})",
+    )
+
+    # Plat warna dasar hitam dengan teks putih (transisi TNKB lama)
+    white_plate = simulate.render_plate("L 1257 PR", height=110, aspect=3.54)
+    black_plate = 255 - white_plate
+    mask_black = pipeline._ink_mask(black_plate, trim_x=0.03, trim_y=0.10)
+    check(
+        "polaritas plat hitam otomatis dibalik (proporsi tinta < 0.55)",
+        float((mask_black > 0).mean()) <= 0.55 and pipeline.ink_glyph_count(black_plate) >= 5,
+        f"(mean={float((mask_black > 0).mean()):.2f}, glyphs={pipeline.ink_glyph_count(black_plate)})",
+    )
+    text_black, conf_black, _ = ocr.read_plate_robust(black_plate, "car")
+    check(
+        "OCR membaca plat hitam teks putih (L1257PR)",
+        text_black == "L1257PR" and conf_black > 0.5,
+        f"(dapat {text_black!r} conf={conf_black})",
+    )
+
+    # snap_to_text_band(keep_horizontal=True) menjaga lebar penuh crop YOLO
+    snapped, (x1, _y1, x2, _y2) = pipeline.snap_to_text_band(white_plate, keep_horizontal=True)
+    check(
+        "keep_horizontal=True menjaga lebar horizontal penuh",
+        x1 == 0 and x2 == white_plate.shape[1] and snapped.shape[1] == white_plate.shape[1],
+        f"(dapat x1={x1}, x2={x2}, w={white_plate.shape[1]})",
+    )
 
 def test_signed_sticker_token() -> None:
     print("signed sticker token")
@@ -448,6 +507,118 @@ def test_model_variant() -> None:
     )
 
 
+def test_cpu_ram_optimizations() -> None:
+    print("optimasi efisiensi CPU & RAM (PERF-1 s.d. PERF-7)")
+    from app import config as _config
+    from app import service
+
+    np = pipeline._np()
+    check("SGS_ENABLE_SECONDARY_OCR default nonaktif (PERF-1)", _config.ENABLE_SECONDARY_OCR is False)
+    check("SGS_SAVE_PIPELINE_STAGES default nonaktif (PERF-4)", _config.SAVE_PIPELINE_STAGES is False)
+    check("anggaran OCR per frame terdefinisi (PERF-2)", service.MAX_OCR_CALLS_FAST == 2 and service.MAX_OCR_CALLS_FULL == 6)
+
+    dummy = np.zeros((32, 64, 3), dtype=np.uint8)
+    pre_sharp = 123.45
+    scored = pipeline.frame_score(dummy, 0.8, sharpness=pre_sharp)
+    check(
+        "frame_score menerima sharpness pra-hitung tanpa Laplacian ulang (PERF-3)",
+        abs(scored - (123.45 * 0.8)) < 1e-6,
+        f"(dapat {scored})",
+    )
+
+    # grow_to_text_line sub-window lokal menghasilkan crop valid (PERF-3)
+    plate_img = simulate.render_plate("B 1234 XYZ", height=110, aspect=3.54)
+    h, w = plate_img.shape[:2]
+    grown = pipeline.grow_to_text_line(plate_img, (int(w * 0.2), int(h * 0.2), int(w * 0.8), int(h * 0.8)))
+    check("grow_to_text_line sub-window lokal valid", grown.size > 0 and grown.shape[1] >= int(w * 0.5))
+
+
+def test_kfold_stratified_group_cv() -> None:
+    print("5-Fold Stratified Group Cross-Validation & Anti-Degradation (TRAIN-1 s.d. TRAIN-4)")
+    import train_yolo
+    from tools import prepare_kfold
+
+    np = pipeline._np()
+    img1 = simulate.render_plate("B 1234 XYZ", height=80, aspect=3.54)
+    img1_near = img1.copy()
+    img1_near[0, 0] = (img1_near[0, 0].astype(int) ^ 1).astype(np.uint8)
+    img2 = simulate.render_plate("DD 5877 US", height=80, aspect=3.54)
+
+    h1 = prepare_kfold.compute_dhash(img1)
+    h1_near = prepare_kfold.compute_dhash(img1_near)
+    h2 = prepare_kfold.compute_dhash(img2)
+    check("dHash 64-bit menghasilkan integer non-nol", h1 > 0 and h2 > 0)
+    check(
+        "dHash frame hampir identik memiliki jarak Hamming <= 2",
+        prepare_kfold.hamming_distance(h1, h1_near) <= 2,
+        f"(dapat {prepare_kfold.hamming_distance(h1, h1_near)})",
+    )
+
+    groups = prepare_kfold.assign_visual_groups([h1, h1_near, h2], ["sha_a", "sha_b", "sha_c"], hamming_threshold=4)
+    check("frame mirip dikelompokkan ke group_id yang sama", groups[0] == groups[1])
+
+    # Uji StratifiedGroupKFold 5-fold: anggota group yang sama tidak pernah bocor antara train & val
+    strata = [f"rf__small__one_row" if i % 2 == 0 else "kg__medium__one_row" for i in range(25)]
+    sample_groups = [i // 2 for i in range(25)]  # pasangan gambar (0,1), (2,3), ... satu group
+    folds = prepare_kfold.stratified_group_kfold_indices(strata, sample_groups, k=5, seed=42)
+    check("5-Fold CV menghasilkan 5 pasangan (train, val)", len(folds) == 5)
+    no_leakage = True
+    all_val_union: set[int] = set()
+    for train_idx, val_idx in folds:
+        train_groups = {sample_groups[i] for i in train_idx}
+        val_groups = {sample_groups[i] for i in val_idx}
+        if train_groups & val_groups:
+            no_leakage = False
+        all_val_union.update(val_idx)
+    check("tidak ada kebocoran group_id antara train dan val di seluruh 5 fold", no_leakage)
+    check("seluruh sampel terwakili tepat di 1 fold validasi", len(all_val_union) == 25)
+    check(
+        "hiperparameter anti-degradasi memiliki fliplr=0.0 & perspective>0 (TRAIN-2, TRAIN-4)",
+        train_yolo.ANTI_DEGRADATION_HYPS["fliplr"] == 0.0
+        and train_yolo.ANTI_DEGRADATION_HYPS["perspective"] > 0
+        and train_yolo.ANTI_DEGRADATION_HYPS["weight_decay"] >= 0.001,
+    )
+
+
+def test_security_and_cleanup_polish() -> None:
+    print("hardening residual & cleanup (SEC-1, SEC-2, OCR-8, OCR-9)")
+    from app import web
+
+    check("dead code _enhance_ocr_crop sudah dihapus dari app.ocr (OCR-8)", not hasattr(ocr, "_enhance_ocr_crop"))
+
+    valid_fields = {
+        "plate_number": "B 1234 XYZ",
+        "sticker_code": "STK-WRG-0042",
+        "owner_name": "Budi",
+        "owner_type": "warga",
+        "vehicle_type": "car",
+        "valid_until": "2028-12-31",
+    }
+    check("validasi kendaraan sah diterima (SEC-2)", web._validate_vehicle(valid_fields) is None)
+    check(
+        "plat > 16 karakter ditolak server-side (SEC-2)",
+        web._validate_vehicle({**valid_fields, "plate_number": "B 123456789012345 XYZ"}) is not None,
+    )
+    check(
+        "plat dengan karakter injeksi/simbol ditolak server-side (SEC-2)",
+        web._validate_vehicle({**valid_fields, "plate_number": "B1234';DROP"}) is not None,
+    )
+    check(
+        "sticker_code > 64 karakter ditolak server-side (SEC-2)",
+        web._validate_vehicle({**valid_fields, "sticker_code": "S" * 65}) is not None,
+    )
+
+    test_ip = "198.51.100.99"
+    web._clear_login_failures(test_ip)
+    for _ in range(web.LOGIN_MAX_FAILURES - 1):
+        web._record_login_failure(test_ip)
+    check("di bawah ambang gagal login belum terblokir (SEC-1)", not web._login_rate_limited(test_ip))
+    web._record_login_failure(test_ip)
+    check("mencapai 5 gagal login dalam 60 detik diblokir HTTP 429 (SEC-1)", web._login_rate_limited(test_ip))
+    web._clear_login_failures(test_ip)
+    check("reset catatan gagal login membuka blokir setelah sukses (SEC-1)", not web._login_rate_limited(test_ip))
+
+
 def main() -> int:
     tests = [
         test_normalize_plate,
@@ -461,6 +632,10 @@ def main() -> int:
         test_model_variant,
         test_detection_roi,
         test_plate_text_quality_gate,
+        test_two_row_and_black_plate,
+        test_cpu_ram_optimizations,
+        test_kfold_stratified_group_cv,
+        test_security_and_cleanup_polish,
         test_signed_sticker_token,
         test_read_plate_robust,
         test_date_sticker_row,

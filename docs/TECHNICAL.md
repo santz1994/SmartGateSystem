@@ -188,21 +188,18 @@ Lihat tabel keputusan di [SYSTEM_FLOW.md](SYSTEM_FLOW.md#4-tabel-keputusan). Uru
 3. Kendaraan `jenis = OPERASIONAL` dan `require_booking_for_operational = true`? Wajib booking aktif, bila tidak → `NO_MATCH`.
 4. `fused_score ≥ fused_confidence_threshold` → `MATCH` → `AUTO_OPEN`. Selain itu → alert KUNING, minta konfirmasi satpam.
 
-### 5.4 Normalisasi Plat
+### 5.4 Normalisasi Plat (Peraturan Kepolisian Nomor 7 Tahun 2021)
 
-Normalisasi bersifat **block-aware**, bukan penggantian global. Teks dipecah
-menjadi blok prefix wilayah (1–3 huruf), nomor urut (1–4 angka), dan suffix
-(0–3 huruf); setiap pemecahan blok dinilai (karakter sesuai bloknya bernilai
-penuh, karakter ambigu bernilai setengah), kode wilayah valid
-(`VALID_PREFIXES`) mendapat bonus, dan nomor urut berawalan `0` dikenai
-penalti karena NRKB tidak pernah diawali `0`. Koreksi karakter ambigu
-dilakukan per blok — `0/1/O/I/L` → `D` dan `8` → `B` hanya pada prefix,
-digit → huruf hanya pada suffix.
+Normalisasi bersifat **block-aware** mengacu pada **Perpol Nomor 7 Tahun 2021** tentang Registrasi dan Identifikasi Kendaraan Bermotor:
+1. **Pola 3 Blok Pasti**: Teks dipecah menjadi blok Kode Wilayah (**1–2 alfabet** sesuai daerah Polda, mis. `[A]` atau `[AA]`), Nomor Urut Registrasi (**1–4 angka**, digit pertama `1–9`), dan Seri Huruf Akhir (**1–3 alfabet**: `[A]`, `[AA]`, atau `[AAA]` sesuai wilayah Polda).
+2. **Pemisahan Mutlak Alfabet dan Angka**: **Tidak ada angka pada blok alfabet dan tidak ada alfabet pada blok angka**. Koreksi karakter ambigu dilakukan ketat per blok (`8→B`, `0/O→D` pada prefix yang tidak valid; `O/D→0`, `I/L→1`, `Z→2`, `A→4`, `S→5`, `G→6`, `T→7`, `B→8` pada blok angka; dan digit→alfabet pada blok suffix).
+3. **Alokasi Nomor Urut (Umum vs Polda Metro Jaya)**:
+   - **Umum**: Mobil Pribadi `1–1999`, Motor `2000–6999`, Bus `7000–7999`, Barang `8000–8999`, Khusus `9000–9999`.
+   - **Polda Metro Jaya (`B`)**: Mobil Pribadi `1–2999`, Motor `3000–6999`, Bus `7000–7999`, Barang `8000–8999`, Khusus `9000–9999`.
+4. **Penyaringan 4 Digit Masa Berlaku (`MMYY`)**: Empat digit angka di bagian bawah TNKB (2 digit awal bulan `01–12`, 2 digit belakang tahun) dipisahkan dan tidak boleh masuk ke dalam nomor plat maupun seri huruf akhir.
+5. **Toleransi Ukuran pada Gambar Bergerak**: Karena perspektif dan gerak kendaraan mengubah dimensi piksel di kamera, rasio ukuran fisik TNKB dipakai sebagai *soft prior* bersama alokasi nomor urut di atas.
 
-Hasil akhir yang tetap melanggar struktur NRKB (bagian depan wajib huruf,
-nomor tidak diawali `0`, urutan blok huruf→angka→huruf) **ditolak keras**
-sebagai tidak terbaca — bukan ditampilkan apa adanya — dan confidence-nya
-tidak dihitung ke skor fusi.
+Hasil akhir yang tetap melanggar struktur NRKB (bagian depan wajib kode wilayah huruf, nomor tidak diawali `0`, urutan blok alfabet→angka→alfabet) **ditolak keras** sebagai tidak terbaca (`OCR_FAILED`) dan confidence-nya tidak dihitung ke skor fusi.
 
 ---
 

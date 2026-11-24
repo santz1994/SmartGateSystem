@@ -243,10 +243,10 @@ def detect(image: Any, max_candidates: int = 4) -> list[Detection]:
         # tanpa glyph, tetapi jangan menggugurkan plat valid hanya karena kontras.
         if not texture_ok and plausibility < 0.35:
             continue
-        # Bobot hasil training kadang mengurung seluruh bagian depan mobil,
-        # bukan papan platnya. Persempit box visual dan crop OCR ke pita teks
-        # agar EasyOCR tidak ikut membaca gril, logo, atau bumper.
-        text_band, _ = snap_to_text_band(crop)
+        # Bobot hasil training kadang mengurung sedikit bagian vertikal atas/bawah
+        # papan plat. Persempit vertikal ke pita teks, tetapi jaga batas horizontal
+        # YOLO (keep_horizontal=True) agar huruf prefix/suffix di tepi tidak terpotong.
+        text_band, _ = snap_to_text_band(crop, keep_horizontal=True)
         if getattr(text_band, "size", 0):
             crop = text_band
         # Quad overlay sengaja TIDAK dirapatkan ke pita teks: kotak yang berubah
@@ -254,10 +254,9 @@ def detect(image: Any, max_candidates: int = 4) -> list[Detection]:
         # papan plat. Konteks bodi tetap dibuang oleh snap pada ocr_crop di bawah.
         ocr_crop = four_point_transform(image, _padded_quad(quad, image.shape))
         full_crop = ocr_crop  # crop bermargin: tampilan cadangan bila snap terlalu rapat
-        # Bobot lama kadang memberi box sedikit lebih besar dari papan plat.
-        # Buang konteks bodi/roda sebelum EasyOCR agar suffix tidak tenggelam
-        # oleh teks dan tepi lain di dalam box.
-        text_crop, _ = snap_to_text_band(ocr_crop)
+        # Buang margin vertikal berlebih (mis. stiker tanggal/bumper), tetap
+        # pertahankan lebar horizontal box YOLO agar karakter tepi utuh.
+        text_crop, _ = snap_to_text_band(ocr_crop, keep_horizontal=True)
         if getattr(text_crop, "size", 0):
             ocr_crop = pad_crop(text_crop)  # snap rapat -> margin wajib dikembalikan
         detection = Detection(

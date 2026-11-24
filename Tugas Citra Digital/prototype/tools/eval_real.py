@@ -112,7 +112,9 @@ def eval_ocr(limit: int | None, save_csv: pathlib.Path | None) -> dict:
         if image is None:
             continue
         start = time.perf_counter()
-        text, confidence, _ = ocr.read_plate(image)
+        # OCR-9: Gunakan read_plate_robust agar tangga retry, pemisahan baris
+        # tanggal MMYY, dan validasi NRKB Perpol No. 7 Tahun 2021 ikut teruji.
+        text, confidence, _ = ocr.read_plate_robust(image)
         latencies.append((time.perf_counter() - start) * 1000.0)
         got, want = _normalize(text), _normalize(truth)
         exact += int(got == want)

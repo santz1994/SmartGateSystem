@@ -76,9 +76,66 @@ Augmentasi yang relevan:
 - crop dan resize yang mempertahankan karakter plat;
 - pantulan/silau hanya sebagai variasi tambahan, bukan pengganti foto nyata.
 
-Hindari flip vertikal, distorsi ekstrem, atau augmentasi yang membuat bentuk
-plat tidak realistis. Pisahkan kendaraan yang sama antar split agar metrik tidak
-terlihat tinggi karena kebocoran frame.
+Hindari flip vertikal, **flip horizontal (`fliplr=0.0` wajib karena urutan huruf plat tidak boleh terbalik cermin)**, distorsi ekstrem, atau augmentasi yang membuat bentuk plat tidak realistis. Pisahkan kendaraan yang sama antar split agar metrik tidak terlihat tinggi karena kebocoran frame.
+
+### 2.1 Mitigasi Degradasi Model: Generalization & $K$-Fold Cross-Validation
+
+Audit pada kurva pelatihan (`results.csv` run V6) menunjukkan dua penyebab utama terjadinya **degradasi model** (*model degradation*):
+1. **Ketimpangan Split & Single-Domain Validation**: Penggabungan dataset saat ini menaruh 3.982 gambar multi-domain (`plat-nomor`, `rf_`, `kg_`, `mg_`, `bg_`) ke `train`, sementara `valid` (84 gambar) dan `test` (84 gambar) hanya berasal dari 1 sumber awal dan memiliki **0 gambar background negatif**. Akibatnya, pemilihan `best.pt` memiliki variansi tinggi dan bias ke satu domain kamera.
+2. **Overfitting Paruh Akhir Epoch**: Pada model berkapasitas besar (mis. YOLOv8x), `val/box_loss` mencapai titik terbaik di sekitar Epoch 30 (`1.3188`), lalu mengalami degradasi (naik kembali ke `1.3945–1.4252`) pada Epoch 31–50 meskipun `train/box_loss` terus turun, terutama setelah `close_mosaic` mematikan augmentasi Mosaic.
+
+Untuk mengatasinya, terapkan **Stratified Group $K$-Fold Cross-Validation ($K=5$)** dan **Regularisasi Generalisasi**:
+
+#### A. Protokol 5-Fold Stratified Group Cross-Validation
+1. **Anti-Leakage Berbasis Perceptual Hash (`dHash` 64-bit)**:
+   Selain dedup `SHA-256` (byte identik), hitung `dHash` (ubah gambar ke grayscale `9×8`, bandingkan `img[:, 1:] > img[:, :-1]`) untuk mengelompokkan frame CCTV berurutan dari kendaraan yang sama ke dalam satu `group_id`. Semua gambar dengan `group_id` yang sama wajib berada di fold yang sama (*GroupKFold*).
+2. **Stratifikasi Lintas Sumber & Skala Bbox**:
+   Bagi gabungan pool data (~4.150 gambar) menjadi $K=5$ fold (~3.320 `train` dan ~830 `val` per fold) dengan menjaga proporsi:
+   - Sumber domain (`orig`, `rf_`, `kg_`, `mg_`, `bg_`);
+   - Ukuran relatif bbox plat (`small` < 1,5% luas frame, `medium`, `large`) dan rasio aspek (`1-baris` vs `2-baris`).
+3. **Manifest Fold Tanpa Duplikasi File**:
+   Tulis daftar path gambar ke `fold_0_train.txt`, `fold_0_val.txt`, ..., `fold_4_val.txt` dan buat `data_fold_k.yaml` yang menunjuk langsung ke file `.txt` tersebut (Ultralytics YOLO mendukung file `.txt` berisi daftar path gambar sebagai nilai `train:` dan `val:` di `data.yaml`).
+4. **Evaluasi & Pemanfaatan Hasil $K$-Fold**:
+   - Laporkan rata-rata dan simpangan baku lintas 5 fold: $\text{mAP50}_{\text{CV}} = \mu \pm \sigma$.
+   - Gunakan prediksi *Out-of-Fold (OOF)* pada seluruh dataset untuk mendeteksi *label noise* (anotasi bbox yang meleset atau terlewat) lalu bersihkan sebelum melatih model produksi final.
+
+#### B. Parameter Generalisasi Anti-Degradasi (Rekomendasi Training)
+Saat melatih di `train_yolo.py` maupun notebook Colab/Kaggle, gunakan konfigurasi regularisasi berikut agar model tidak mengalami degradasi saat dipasang pada kamera gate nyata:
+
+```python
+model.train(
+    data=str(RUNTIME_YAML),
+    epochs=50,
+    imgsz=640,
+    batch=16,
+    patience=15,
+    cos_lr=True,          # Cosine annealing LR schedule
+    lrf=0.01,
+    warmup_epochs=3.0,
+    weight_decay=0.001,   # Regularisasi L2 lebih kuat untuk menahan degradasi val/box_loss
+    dropout=0.10,         # Regularisasi head deteksi
+    # --- Augmentasi Geometrik Spesifik Kamera Gate ---
+    degrees=7.0,          # Rotasi kamera miring
+    translate=0.10,
+    scale=0.45,           # Variasi jarak kendaraan (CCTV 1 jauh vs CCTV 2 dekat)
+    shear=2.5,            # Kemiringan sudut pandang samping
+    perspective=0.0004,   # Distorsi perspektif 3D papan plat
+    fliplr=0.0,           # WAJIB 0.0: jangan balik urutan karakter kiri-kanan!
+    flipud=0.0,
+    # --- Augmentasi Komposisi & Ketahanan Oklusi/Silau ---
+    mosaic=0.8,
+    mixup=0.05,
+    copy_paste=0.10,
+    erasing=0.25,         # Random erasing: paksa deteksi walau sebagian plat tertutup silau/kotoran
+    close_mosaic=15,      # Matikan mosaic 15 epoch terakhir secara halus
+    # --- Augmentasi Fotometrik (Siang / Malam / Kamera / Monitor) ---
+    hsv_h=0.015,
+    hsv_s=0.65,
+    hsv_v=0.45,
+)
+```
+
+Selain itu, pastikan minimal **5–10% gambar di split `train` dan `val`** adalah *hard-negative background* (gambar tanpa plat: gril mobil, bumper, layar/subtitle, marka jalan) dan pilih checkpoint terbaik yang memaksimalkan kombinasi **`val mAP50` + `End-to-End Valid Format OCR Rate`**.
 
 ## 3. Training YOLO
 
@@ -276,18 +333,26 @@ Retry dibatasi dan model di-warm-up agar latency tidak membengkak. Test pipeline
 terakhir mencakup normalisasi NRKB, ROI, pemilihan kendaraan, retry OCR, dan
 fusi hasil.
 
-Aturan NRKB digunakan sebagai **skor tambahan**, bukan kebenaran tunggal:
+Aturan TNKB & NRKB berdasarkan **Peraturan Kepolisian (Perpol) Nomor 7 Tahun 2021** tentang Registrasi dan Identifikasi Kendaraan Bermotor ditegakkan sebagai spesifikasi validasi dan koreksi karakter:
 
-- prefix 1--3 huruf;
-- nomor urut 1--4 digit dan digit pertamanya bukan `0`;
-- suffix 0--3 huruf;
-- konteks posisi membedakan `B/8`, `6/G`, `1/I`, `O/0`, `I/1`, `L/1`, `S/5`, `T/7`, `A/4`, `D/0`, `V/U`, `W/VV`, `X/XX`, `Z/2`;
-- koreksi blok prefix (`_PREFIX_FIX`): `0/1/O/I/L` → `D`, `8` → `B`, plus bonus
-  skor untuk kode wilayah valid di `VALID_PREFIXES` — mis. `005877US` →
-  `DD5877US` (plat Makassar), dan blok angka diawali `0` dikenai penalti karena
-  NRKB tak pernah mulai dari `0`.
+1. **Pola Struktur Pasti (`[Kode Wilayah] [Nomor Urut] [Seri Huruf]`)**:
+   - Prefix kode wilayah **1 atau 2 huruf** (`[A]` atau `[AA]`) sesuai daerah Polda (`VALID_PREFIXES`);
+   - Nomor urut registrasi **1--4 digit angka** (`[Angka]` s.d. `[Angka][Angka][Angka][Angka]`) dan digit pertamanya bukan `0`;
+   - Suffix seri akhir **1--3 huruf** (`[A]`, `[AA]`, atau `[AAA]`) sesuai ketetapan daerah Polda masing-masing (mis. `[A] [9999] [AAA]`, `[A] [9999] [AA]`, `[A] [9999] [A]`, `[AA] [9999] [A]`, `[AA] [9999] [AA]`, `[AA] [9999] [AAA]`);
+2. **Pemisahan Mutlak Alfabet dan Angka**:
+   - **Tidak ada angka pada blok alfabet dan tidak ada alfabet pada blok angka**;
+   - Konteks posisi blok membedakan karakter ambigu `B/8`, `6/G`, `1/I`, `O/0`, `I/1`, `L/1`, `S/5`, `T/7`, `A/4`, `D/0`, `Z/2`, `Q/O`;
+   - Koreksi blok prefix dilakukan hanya bila prefix mentah mengandung digit atau belum termasuk kode wilayah sah di `VALID_PREFIXES` (mis. `005877US` → `DD5877US` untuk plat Makassar, tanpa merusak prefix sah seperti `L` atau `BL`);
+3. **Alokasi Nomor Urut Kendaraan (Umum vs Polda Metro Jaya `B`)**:
+   - **Wilayah Umum**: Mobil Pribadi `1--1999`, Sepeda Motor `2000--6999`, Mobil Bus `7000--7999`, Mobil Barang `8000--8999`, Kendaraan Khusus `9000--9999`;
+   - **Wilayah Polda Metro Jaya (`B`)**: Mobil Pribadi `1--2999`, Sepeda Motor `3000--6999`, Mobil Bus `7000--7999`, Mobil Barang `8000--8999`, Kendaraan Khusus `9000--9999`;
+4. **4 Digit Masa Berlaku di Bawah TNKB (`MMYY`)**:
+   - 4 digit angka di baris bawah TNKB adalah masa berlaku: **2 digit awal bulan (`01--12`)** dan **2 digit belakang tahun (`YY`)**; wajib dipisahkan dan dibuang dari kandidat teks plat utama;
+5. **Warna Dasar (Pasal 45 Perpol 7/2021) & Ukuran pada Gambar Bergerak**:
+   - Mendukung warna dasar Putih-tulisan-Hitam (pribadi/badan hukum), Kuning-tulisan-Hitam (umum), Merah-tulisan-Putih (pemerintah), Hijau-tulisan-Hitam (FTZ), lis biru (kendaraan listrik), serta plat lama Hitam-tulisan-Putih (dua polaritas mask);
+   - Karena gambar diambil dari kendaraan yang bergerak (distorsi sudut perspektif & jarak), ukuran dan rasio aspek plat dijadikan patokan toleran (*soft prior* `1,20--5,00`) yang disilangkan dengan alokasi nomor urut di atas.
 
-Referensi struktur nomor: [Bapenda Jawa Barat](https://bapenda.jabarprov.go.id/2017/10/24/kenali-penomoran-kendaraan-bermotor/).
+Referensi regulasi: **Peraturan Kepolisian Negara Republik Indonesia Nomor 7 Tahun 2021** tentang Registrasi dan Identifikasi Kendaraan Bermotor.
 
 ## 7. Pantulan dan Kasus Sulit
 
