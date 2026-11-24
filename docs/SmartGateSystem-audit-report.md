@@ -530,8 +530,9 @@ Untuk mencegah degradasi di paruh akhir epoch (seperti yang terjadi pada Epoch 3
    - Memisahkan rentang alokasi nomor urut pada `NUMBER_GROUPS_GENERAL` (`NUMBER_GROUPS`) dan `NUMBER_GROUPS_METRO`: `(7000, 7999, "bus")` khusus Mobil Bus dan `(8000, 8999, "truck")` khusus Mobil Barang sesuai Perpol No. 7 Tahun 2021.
 3. **[SELESAI ✅] Fail-Safe `db.settings()` di `evaluate()` (`L-3`, `app/service.py:409-461`)**:
    - Membungkus `thresholds = db.settings()` di dalam `try ... except sqlite3.Error:` dengan fallback aman ke `dict(config.DEFAULTS)` dan `db_available = False` agar gangguan SQLite saat cache kosong tidak pernah melempar *unhandled exception* maupun memicu `AUTO_OPEN`.
-4. **[SELESAI ✅] Dukungan Pemuatan Otomatis `best.onnx` via ONNX Runtime (`L-4`, `app/config.py`, `app/detect_yolo.py`)**:
-   - Menambahkan dukungan prioritas `.onnx` (`runs/detect/smartgate-colab-v6-*/weights/best.onnx` dan `smartgate-artifacts-*/best.onnx`) yang otomatis aktif saat `onnxruntime` terpasang (`SGS_USE_ONNX=1` default) dengan fallback mulus ke `.pt`.
-5. **Verifikasi Otomatis Akhir**: Seluruh **`151 pemeriksaan`** di `tests/test_pipeline.py` (termasuk pengujian nyata `plat-nomor/test` serta regresi `M-1`, `L-1`, `L-2`, `L-3`, `L-4`) lulus 100%.
+4. **[SELESAI ✅] Runner ONNX Murni (`best.onnx`) & Perbaikan Konflik DLL Windows `torch\lib\shm.dll` (`L-4`, `app/config.py`, `app/detect_yolo.py`, `app/ocr.py`)**:
+   - Menambahkan `_OnnxYoloRunner` yang menjalankan `best.onnx` (`runs/detect/smartgate-colab-v6-*/weights/best.onnx` dan `smartgate-artifacts-*/best.onnx`) secara murni melalui `onnxruntime` atau `cv2.dnn.readNetFromONNX` bawaan OpenCV (`SGS_USE_ONNX=1` default) **tanpa mengimpor `torch` maupun `ultralytics`**, serta fallback aman (`except (ImportError, OSError)`) ke `.pt`.
+   - Memuat `paddlex` sebelum `import paddle` di `_configure_paddle_cpu()` (`app/ocr.py:368-398`) untuk menghilangkan konflik DLL Windows `[WinError 127] torch\lib\shm.dll` dan `RuntimeError: PDX has already been initialized`.
+5. **Verifikasi Otomatis Akhir**: Seluruh **`151 pemeriksaan`** di `tests/test_pipeline.py` (termasuk pengujian nyata `plat-nomor/test` dengan `backend=paddleocr` + `opencv-dnn-onnx`, serta regresi `M-1`, `L-1`, `L-2`, `L-3`, `L-4`) lulus 100%.
 
 

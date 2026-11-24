@@ -21,7 +21,7 @@ setelah pemeriksaan visual; foto, pengguna, waktu, dan alasan tetap dicatat.
 Ringkasan eksperimen terbaru (**v6 Multi-Domain 5-Fold Stratified Group CV — Fold 0**):
 - **YOLOv11n (`smartgate-colab-v6-yolo11n`)**: Bobot `5,48 MB` (`.pt`) / `10,66 MB` (`.onnx`), **Test Hold-out mAP50 = `0,9693`**, `mAP50-95 = 0,6150`, Validation Fold 0 multi-domain `mAP50 = 0,8464` (`mAP50-95 = 0,5686`), End-to-End OCR Valid Format Rate `74,07%` (`80/108`), latensi rata-rata `87,43 ms` (`P95 = 161,03 ms`).
 - **YOLOv8n (`smartgate-colab-v6-yolov8n`)**: Bobot `6,48 MB` (`.pt`) / `12,77 MB` (`.onnx`), **Test Hold-out mAP50 = `0,9617`**, `mAP50-95 = 0,5931`, Validation Fold 0 multi-domain `mAP50 = 0,8488` (`mAP50-95 = 0,5669`), **End-to-End OCR Valid Format Rate = `75,96%`** (`79/104`, naik dari `72,03%`), latensi rata-rata `76,50 ms` (`P95 = 157,19 ms`).
-- Seluruh pipeline dikunci dengan **133 pemeriksaan** regresi otomatis di `tests/test_pipeline.py`.
+- Seluruh pipeline dikunci dengan **151 pemeriksaan** regresi otomatis di `tests/test_pipeline.py` (termasuk uji dataset nyata `plat-nomor/test`, runner YOLO ONNX murni tanpa PyTorch, dan perlindungan `deglare()` TNKB putih).
 
 ## 2. Tujuan
 

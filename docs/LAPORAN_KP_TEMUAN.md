@@ -31,8 +31,8 @@
 
 | Komponen | Versi / Keterangan |
 | :--- | :--- |
-| Deteksi plat | YOLOv8n / YOLOv8x / YOLOv11n (Ultralytics, CPU) |
-| OCR | PaddleOCR (PP-OCRv6 medium) + EasyOCR (fallback), murni CPU |
+| Deteksi plat | YOLOv8n / YOLOv11n (`best.onnx` murni via `onnxruntime` / `cv2.dnn` tanpa PyTorch; fallback `.pt` Ultralytics & OpenCV klasik) |
+| OCR | PaddleOCR (`PP-OCRv6_medium_rec` jalur cepat), murni CPU (`SGS_ENABLE_SECONDARY_OCR=0` default untuk mencegah *dual-runtime RAM bloat*) |
 | Web server | Flask (dev) / Waitress (mode produksi `--prod`) |
 | Database | SQLite (WAL) |
 
@@ -88,26 +88,34 @@ Dengan angka ini interval auto scan **1,5 detik tercapai** dan sisa CPU cukup
 untuk browser/presentasi. Angka "sebelum" pada tabel latensi di atas tetap
 dipertahankan sebagai dokumentasi temuan awal saat pengujian KP.
 
+### B.2 Konflik DLL Windows antara PaddlePaddle dan PyTorch (`torch\lib\shm.dll`)
+
+Pada pengujian mode produksi (`python run.py --prod`) di lingkungan Windows 11 dengan virtual environment `.venv` yang memuat `PaddlePaddle` dan `PyTorch/Ultralytics` secara bersamaan:
+- Memuat `paddle` sebelum `paddlex`/`torch` memicu galat sistem **`OSError: [WinError 127] ... Error loading "torch\lib\shm.dll"`** saat warmup detektor YOLO serta **`RuntimeError: PDX has already been initialized`** pada panggilan ulang `PaddleOCR`.
+- **Solusi yang diterapkan**:
+  1. Menjalankan model deteksi **`best.onnx`** secara murni melalui `_OnnxYoloRunner` (`onnxruntime` atau `cv2.dnn.readNetFromONNX` bawaan OpenCV, dikontrol `SGS_USE_ONNX=1`) **tanpa mengimpor `torch` maupun `ultralytics`**, sehingga konflik DLL hilang total dan konsumsi RAM produksi semakin ringan.
+  2. Memuat `paddlex` sebelum `import paddle` pada `_configure_paddle_cpu()` di `app/ocr.py` dan menangkap `(ImportError, OSError)` pada fallback `.pt`.
+
 ---
 
 ## C. Tindakan Mitigasi yang Telah Dilakukan
 
 | Tindakan | Dampak |
 | :--- | :--- |
-| *Warmup* hanya satu backend OCR (backend cadangan dimuat malas saat dibutuhkan) | Pemakaian RAM aplikasi turun ±1 GB |
-| Batas inferensi konkuren (semaphore 2 proses) | CPU tidak lumpuh oleh banyak scan paralel |
+| *Warmup* hanya satu backend OCR (`SGS_ENABLE_SECONDARY_OCR=0`, tanpa memuat EasyOCR/PyTorch bersamaan) | Pemakaian RAM aplikasi turun ±1–2 GB (stabil ±1,2 GB RSS) |
+| Runner deteksi YOLO ONNX murni (`_OnnxYoloRunner` via `onnxruntime` / `cv2.dnn`, `SGS_USE_ONNX=1`) + urutan inisialisasi `paddlex` sebelum `paddle` | Menghilangkan crash Windows `torch\lib\shm.dll` (`WinError 127`) dan `PDX has already been initialized`, tanpa perlu memuat PyTorch ke RAM |
+| Perlindungan `deglare()` untuk TNKB dasar putih (`median < 175`, `gray >= 251`, `glare_ratio <= 0,25`), pelestarian huruf seri `Q`, pemisahan golongan `bus` (`7000–7999`) vs `truck` (`8000–8999`), serta *fail-safe* `db.settings()` | Menutup seluruh temuan audit minor (`M-1`, `L-1`, `L-2`, `L-3`, `L-4`) agar tepi karakter TNKB putih tetap tajam dan kegagalan SQLite tidak pernah memicu `AUTO_OPEN` |
+| Batas inferensi konkuren (semaphore `SGS_MAX_CONCURRENT_INFER=1`) | CPU tidak lumpuh oleh banyak scan paralel |
 | Rotasi snapshot otomatis (maksimum 200 sesi) | Penyimpanan tidak membengkak tanpa batas |
-| Pemangkasan jumlah percobaan OCR + *early stop* saat hasil sudah valid | Scan 3 frame turun dari **> 10 menit menjadi ±45–58 detik** |
-| Cache hasil baca per frame identik (TTL 30 detik) | Auto scan tidak mengulang pekerjaan yang sama |
-| Batas thread inferensi (OMP/PyTorch/OpenCV = setengah core logis) + `OMP_WAIT_POLICY=PASSIVE` | CPU saat scan turun dari ~90% menjadi **±53%** — CPU tidak lagi jenuh oleh pool thread yang saling berebut |
-| Jalur cepat OCR: recognizer tanpa deteksi teks (deteksi teks hanya untuk hasil gagal format) | Satu pembacaan OCR turun dari ±2,9 detik menjadi **±0,45 detik** |
-| Satu inferensi pada satu waktu (semaphore `SGS_MAX_CONCURRENT_INFER`) | Dua scan paralel tidak lagi saling memperlambat |
+| Pemangkasan jumlah percobaan OCR + anggaran keras (`MAX_OCR_CALLS_FAST=2`, `FULL=6`) + *early stop* | Scan 3 frame turun dari **> 10 menit menjadi ±5 detik** |
+| Cache hasil baca per frame identik (TTL 30 detik, SHA-1 *zero-copy*) | Auto scan tidak mengulang pekerjaan yang sama |
+| Batas thread inferensi (`SGS_CPU_THREADS` = setengah core logis) + `OMP_WAIT_POLICY=PASSIVE` | CPU saat scan turun dari ~90% menjadi **±53%** — CPU tidak lagi jenuh oleh pool thread yang saling berebut |
+| Jalur cepat OCR: recognizer `PP-OCRv6_medium_rec` tanpa deteksi teks | Satu pembacaan OCR turun dari ±2,9 detik menjadi **±0,45 detik** |
 
-*Catatan: perbaikan murni logika/kode (pemilihan crop, aturan format nomor plat,
-penyaringan stiker tanggal, dan seterusnya) dikerjakan sebagai bagian
-pengembangan internal dan tidak dicatat sebagai temuan masalah lingkungan
-pengujian. Regresi dijaga oleh test suite otomatis (**102/102 pemeriksaan
-lulus**).*
+*Catatan: seluruh perbaikan logika, keamanan, efisiensi, dan kompatibilitas runtime
+dijaga oleh test suite otomatis (**151/151 pemeriksaan lulus**, termasuk uji
+deteksi & OCR pada dataset nyata `plat-nomor/test`). Detail audit lengkap
+tersedia di [`AUDIT_FULL_CODE_ML.md`](AUDIT_FULL_CODE_ML.md).*
 
 ---
 
@@ -115,7 +123,7 @@ lulus**).*
 
 1. **Gunakan PC/laptop khusus minimal 16 GB RAM** — beban utama bukan deteksi,
    melainkan OCR di CPU. Perangkat uji (12 GB) sudah berada di batas.
-2. **Pertimbangkan GPU kecil / NPU** atau ekspor model deteksi ke format **ONNX Runtime** (`best.onnx`) agar waktu inferensi per kendaraan semakin ringan dan *real-time* (< 1 detik per kendaraan).
+2. **Pertahankan mode ONNX (`SGS_USE_ONNX=1`, default aktif)** — model deteksi `best.onnx` (`10,66 MB` YOLOv11n / `12,77 MB` YOLOv8n) kini sudah berjalan otomatis tanpa PyTorch; bila dibutuhkan latensi < 1 detik konsisten pada beban tinggi, tambahkan paket `onnxruntime` atau akselerator GPU kecil / NPU.
 3. **Kamera Logitech C920 sudah memadai**; yang krusial adalah **pencahayaan dan
    sudut**: usahakan plat terisi ±70% lebar frame, tidak menyorot layar.
 4. Interval auto scan **1,5 detik kini tercapai** setelah optimasi (scan cepat

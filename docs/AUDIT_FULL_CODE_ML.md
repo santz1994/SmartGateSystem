@@ -152,4 +152,4 @@ Sumber: `smartgate-artifacts-Y8N/results.csv` & `smartgate-artifacts-Y11N/result
 5. **Hardening Deployment (`M-2`):** Wajibkan env var `SGS_ADMIN_PASSWORD` / `SGS_GUARD_PASSWORD` di lingkungan produksi dan batasi ukuran maksimum penyimpanan rate-limiter login.
 
 ### Final Technical & ML Sign-Off
-**APPROVED — ALL CODE AUDIT ITEMS CLOSED (`M-1`, `L-1`, `L-2`, `L-3`, `L-4` SELESAI ✅)** — Seluruh perbaikan kode minor hasil audit akhir telah diimplementasikan dan diverifikasi dengan **`151/151` pemeriksaan otomatis lulus 100%** (0 Critical, 0 High).
+**APPROVED — ALL CODE AUDIT ITEMS CLOSED (`M-1`, `L-1`, `L-2`, `L-3`, `L-4` + Windows `shm.dll` / Pure ONNX Runner SELESAI ✅)** — Seluruh perbaikan kode minor hasil audit akhir, runner ONNX murni (`_OnnxYoloRunner` via `onnxruntime` / `cv2.dnn.readNetFromONNX` tanpa mengimpor `torch`/`ultralytics`), serta perbaikan urutan import `paddlex` sebelum `paddle` telah diimplementasikan dan diverifikasi di `.venv` dengan **`151/151` pemeriksaan otomatis lulus 100%** (`backend=paddleocr` + `runtime=opencv-dnn-onnx`, 0 Critical, 0 High).

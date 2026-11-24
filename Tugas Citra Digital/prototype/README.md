@@ -20,9 +20,9 @@ Kedua model dilatih di Google Colab (GPU Tesla T4, 50 epoch, `seed=42`) mengguna
 
 ### Penempatan Bobot Model (`runs/detect/` & `smartgate-artifacts-*/`)
 
-Aplikasi secara otomatis menggunakan bobot hasil training v6 (`YOLO_MODEL_PATH` di [`app/config.py`](app/config.py) dan `VARIANTS` / `ARTIFACT_FALLBACKS` di [`app/detect_yolo.py`](app/detect_yolo.py)) tanpa bergantung pada model v5 lama:
-1. `runs/detect/smartgate-colab-v6-yolo11n/weights/best.pt` (atau langsung dari `../../smartgate-artifacts-Y11N/best.pt`)
-2. `runs/detect/smartgate-colab-v6-yolov8n/weights/best.pt` (atau langsung dari `../../smartgate-artifacts-Y8N/best.pt`)
+Aplikasi secara otomatis menggunakan bobot hasil training v6 (`YOLO_MODEL_PATH` di [`app/config.py`](app/config.py) dan `VARIANTS` / `ONNX_VARIANTS` / `ARTIFACT_FALLBACKS` di [`app/detect_yolo.py`](app/detect_yolo.py)) dengan prioritas **`best.onnx`** murni (`SGS_USE_ONNX=1`, berjalan via `onnxruntime` atau `cv2.dnn` bawaan OpenCV tanpa memuat PyTorch sehingga bebas konflik DLL Windows dengan PaddlePaddle) dan fallback mulus ke `best.pt`:
+1. `runs/detect/smartgate-colab-v6-yolo11n/weights/best.onnx` / `best.pt` (atau langsung dari `../../smartgate-artifacts-Y11N/`)
+2. `runs/detect/smartgate-colab-v6-yolov8n/weights/best.onnx` / `best.pt` (atau langsung dari `../../smartgate-artifacts-Y8N/`)
 
 Untuk menyalin bobot beserta `evaluation_summary.json`, `results.csv`, dan `confusion_matrix.png` dari folder/ZIP artefak Colab di root repositori (`smartgate-artifacts-Y11N` dan `smartgate-artifacts-Y8N`), jalankan:
 
@@ -40,7 +40,7 @@ Varian model aktif (`yolo11n` atau `yolov8n`) dapat diganti langsung saat runtim
 # Jalankan server prototipe
 python run.py
 
-# Jalankan suite regresi otomatis (133 pemeriksaan)
+# Jalankan suite regresi otomatis (151 pemeriksaan)
 python tests\test_pipeline.py
 ```
 

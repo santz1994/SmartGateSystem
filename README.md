@@ -10,7 +10,7 @@ Hasil OCR yang melanggar tata bahasa plat Indonesia ditolak keras (dianggap tida
 
 | Path | Isi & Peran |
 | :--- | :--- |
-| [`docs/`](docs/) | Seluruh dokumentasi & laporan (`.md`) + daftar pustaka Mendeley: [PRD](docs/PRD.md), [TECHNICAL](docs/TECHNICAL.md), [SYSTEM_FLOW](docs/SYSTEM_FLOW.md), [API](docs/API.md), [DATABASE](docs/DATABASE.md), [PRESENTASI](docs/PRESENTASI.md), [LAPORAN_KP_TEMUAN](docs/LAPORAN_KP_TEMUAN.md), [TUGAS_PENGOLAHAN_CITRA_DIGITAL](docs/TUGAS_PENGOLAHAN_CITRA_DIGITAL.md), [TRAINING_GUIDE](docs/TRAINING_GUIDE.md), dan [SmartGateSystem-audit-report](docs/SmartGateSystem-audit-report.md) |
+| [`docs/`](docs/) | Seluruh dokumentasi & laporan (`.md`) + daftar pustaka Mendeley: [PRD](docs/PRD.md), [TECHNICAL](docs/TECHNICAL.md), [SYSTEM_FLOW](docs/SYSTEM_FLOW.md), [API](docs/API.md), [DATABASE](docs/DATABASE.md), [PRESENTASI](docs/PRESENTASI.md), [LAPORAN_KP_TEMUAN](docs/LAPORAN_KP_TEMUAN.md), [TUGAS_PENGOLAHAN_CITRA_DIGITAL](docs/TUGAS_PENGOLAHAN_CITRA_DIGITAL.md), [TRAINING_GUIDE](docs/TRAINING_GUIDE.md), [SmartGateSystem-audit-report](docs/SmartGateSystem-audit-report.md), dan [AUDIT_FULL_CODE_ML](docs/AUDIT_FULL_CODE_ML.md) |
 | [`Tugas Citra Digital/prototype/`](Tugas%20Citra%20Digital/prototype/) | **Aplikasi utama (Flask Prototype)**: pipeline pengolahan citra, detektor YOLO/OpenCV, engine OCR + normalisasi NRKB, dashboard satpam, kamera live, dan test suite |
 | `smartgate-artifacts-*/` | Artefak hasil training Colab/Kaggle (`best.pt`, `best.onnx`, `evaluation_summary.json`, `results.csv`, `confusion_matrix.png`) untuk YOLOv8n dan YOLOv11n |
 
@@ -161,7 +161,8 @@ Detail lengkap hasil pengecekan menyeluruh terhadap efisiensi CPU/RAM, akurasi p
 | `SGS_OCR_BACKEND` | `paddleocr` | Pilihan mesin OCR utama (`paddleocr`, `easyocr`, `template_match`) |
 | `SGS_ENABLE_SECONDARY_OCR` | `0` | Aktifkan (`1`) fallback lintas-engine OCR kedua (default `0` untuk mencegah dual-runtime RAM bloat) |
 | `SGS_SAVE_PIPELINE_STAGES` | `0` | Simpan seluruh 8 tahap citra PNG per frame (`1`) untuk laporan, atau hanya crop bukti *best frame* (`0`) |
-| `SGS_YOLO_VARIANT` / `SGS_YOLO_WEIGHTS` | `yolov8n` / `(auto)` | Varian model YOLO aktif (`yolov8n`, `yolo11n`) atau path ke `best.pt` |
+| `SGS_YOLO_VARIANT` / `SGS_YOLO_WEIGHTS` | `yolov8n` / `(auto)` | Varian model YOLO aktif (`yolov8n`, `yolo11n`) atau path ke `best.onnx` / `best.pt` |
+| `SGS_USE_ONNX` | `1` | Prioritaskan runner ONNX murni (`best.onnx` via `onnxruntime` / `cv2.dnn` tanpa memuat PyTorch); set `0` untuk paksa `.pt` |
 | `SGS_CPU_THREADS` | `cpu_count // 2` | Batas thread inferensi CPU untuk Paddle, PyTorch, dan OpenCV |
 | `SGS_MAX_CONCURRENT_INFER` | `1` | Batas inferensi paralel lintas request HTTP |
 | `SGS_DETECTION_ROI` | `0.05,0.35,0.95,1.0` | ROI deteksi bawah untuk frame kamera lebar (`x1,y1,x2,y2`) |
@@ -174,7 +175,7 @@ Detail lengkap hasil pengecekan menyeluruh terhadap efisiensi CPU/RAM, akurasi p
 
 ## Pengujian & Evaluasi
 
-Jalankan suite pemeriksaan mandiri (**133 pemeriksaan** regresi utama di `tests/test_pipeline.py` tanpa ketergantungan `pytest`):
+Jalankan suite pemeriksaan mandiri (**151 pemeriksaan** regresi utama di `tests/test_pipeline.py` tanpa ketergantungan `pytest`):
 
 ```powershell
 cd "Tugas Citra Digital/prototype"
