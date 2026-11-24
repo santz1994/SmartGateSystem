@@ -65,14 +65,16 @@ DETECTION_ROI = tuple(
 # Batas ukuran upload (MB) untuk foto manual.
 MAX_UPLOAD_MB = 16
 
+REPO_ROOT = BASE_DIR.parent.parent
+
 # Urutan pencarian default bobot detektor YOLO (memprioritaskan v6 Multi-Domain Fold 0:
-# YOLOv11n dan YOLOv8n di runs/detect/smartgate-colab-v6-*/weights/best.pt).
+# runs/detect/smartgate-colab-v6-* lalu langsung ke folder artefak hasil training
+# smartgate-artifacts-Y11N dan smartgate-artifacts-Y8N di root repositori).
 YOLO_MODEL_CANDIDATES: tuple[Path, ...] = (
     BASE_DIR / "runs" / "detect" / "smartgate-colab-v6-yolo11n" / "weights" / "best.pt",
     BASE_DIR / "runs" / "detect" / "smartgate-colab-v6-yolov8n" / "weights" / "best.pt",
-    BASE_DIR / "runs" / "detect" / "smartgate-colab-v5" / "weights" / "best.pt",
-    BASE_DIR / "runs" / "detect" / "runs" / "detect" / "smartgate" / "weights" / "best.pt",
-    BASE_DIR / "runs" / "detect" / "runs" / "detect" / "smartgate-full" / "weights" / "best.pt",
+    REPO_ROOT / "smartgate-artifacts-Y11N" / "best.pt",
+    REPO_ROOT / "smartgate-artifacts-Y8N" / "best.pt",
 )
 
 

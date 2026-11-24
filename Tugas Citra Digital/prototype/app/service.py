@@ -253,9 +253,12 @@ def _process_frame(
             raw = det.meta.get("raw_crop")
             primary = raw if getattr(raw, "size", 0) else det.crop
             vehicle_class = det.meta.get("vehicle_class")
+            # Utamakan crop utama (primary dari YOLO/detektor) terlebih dahulu!
+            # Sebelumnya grow_to_text_line ditaruh di urutan ke-1 sehingga membuang
+            # 1 panggilan OCR penuh pada potongan bumper yang melebar sebelum membaca primary.
             views: list[tuple[Any, bool]] = [
-                (pipeline.grow_to_text_line(image, det.bbox), False),
                 (primary, True),
+                (pipeline.grow_to_text_line(image, det.bbox), False),
             ]
             for view in (det.meta.get("full_crop"), det.crop):
                 if getattr(view, "size", 0) and view is not primary:

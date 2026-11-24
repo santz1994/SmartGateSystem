@@ -66,7 +66,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Train YOLOv8/v11 for Indonesian license plate detection")
     parser.add_argument("--data", default="plat-nomor/data.yaml", help="Path to data.yaml")
     parser.add_argument("--fold", type=int, default=None, help="Indeks fold 5-Fold CV (0..4)")
-    parser.add_argument("--model", default="yolo11n.pt", help="Base model (yolo11n.pt / yolov8n.pt / yolov8x.pt)")
+    parser.add_argument("--model", default="yolo11n.pt", help="Base model (yolo11n.pt / yolov8n.pt)")
     parser.add_argument("--epochs", type=int, default=50, help="Number of epochs")
     parser.add_argument("--imgsz", type=int, default=640, help="Image size")
     parser.add_argument("--batch", type=int, default=16, help="Batch size")

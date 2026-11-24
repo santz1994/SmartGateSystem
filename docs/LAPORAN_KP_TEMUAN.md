@@ -115,16 +115,7 @@ lulus**).*
 
 1. **Gunakan PC/laptop khusus minimal 16 GB RAM** — beban utama bukan deteksi,
    melainkan OCR di CPU. Perangkat uji (12 GB) sudah berada di batas.
-2. **Pertimbangkan GPU kecil / NPU** atau model OCR ringan agar *real-time*
-   (target < 1 detik per kendaraan). Contoh perangkat yang relevan: **Axelera
-   Metis** (Compute Board / M.2 / PCIe) dengan **Voyager SDK** — deteksi objek
-   CCTV dapat di-*offload* ke NPU tersebut (referensi: forum komunitas Axelera
-   "Home Assistant CCTV object and motion detection using Metis" dan repositori
-   `axelera-ai-hub/voyager-sdk` di GitHub). Implementasi lapangan yang mirip
-   dengan proyek ini: `graffitiwriter/Metis-for-Home-Assistant-Motion-Detection`
-   (GitHub) — deteksi zona per-koordinat untuk menyaring positif palsu (konsep
-   sama dengan ROI zona gerbang di prototipe), dan Voyager SDK mendukung
-   *cascaded pipeline* yang bisa diperluas ke pengenalan plat nomor.
+2. **Pertimbangkan GPU kecil / NPU** atau ekspor model deteksi ke format **ONNX Runtime** (`best.onnx`) agar waktu inferensi per kendaraan semakin ringan dan *real-time* (< 1 detik per kendaraan).
 3. **Kamera Logitech C920 sudah memadai**; yang krusial adalah **pencahayaan dan
    sudut**: usahakan plat terisi ±70% lebar frame, tidak menyorot layar.
 4. Interval auto scan **1,5 detik kini tercapai** setelah optimasi (scan cepat
@@ -134,29 +125,44 @@ lulus**).*
 
 ---
 
-## Referensi
+## Referensi (Terdaftar di Mendeley / Crossref / Scopus — 5 Tahun Terakhir: 2021–2026)
 
-1. Harani, N. H., Prianto, C., dan Hasanah, M. (2019). *Deteksi Objek dan
-   Pengenalan Karakter Plat Nomor Kendaraan Indonesia Menggunakan Metode
-   Convolutional Neural Network (CNN) Berbasis Python*. **Jurnal Teknik
-   Informatika**, Vol. 11, No. 3, Agustus 2019. Politeknik Pos Indonesia.
-   [PDF](artc/658-Article%20Text-963-1-10-20200213.pdf) — CNN efektif untuk
-   klasifikasi karakter plat (37 class huruf+angka); deteksi posisi kendaraan
-   memakai Faster R-CNN.
-2. Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor
+> File siap impor 1-klik ke **Mendeley Reference Manager**: [`references_mendeley.ris`](references_mendeley.ris) dan [`references_mendeley.bib`](references_mendeley.bib).
+
+1. Ramadhani, A. D., dkk. (2026). *Analisis Akurasi Pembacaan Karakter Plat
+   Nomor Kendaraan Indonesia Menggunakan YOLOv8 dan EasyOCR*. **Jurnal
+   Teknika**, Vol. 18, No. 2, 147–154. DOI:
+   [10.30736/jt.v18i2.1604](https://doi.org/10.30736/jt.v18i2.1604).
+2. Sutikno, Sugiharto, A., dan Kusumaningrum, R. (2025). *Enhanced Automatic
+   License Plate Detection and Recognition using CLAHE and YOLOv11 for Seat Belt
+   Compliance Detection*. **Engineering, Technology & Applied Science Research
+   (ETASR)**, Vol. 15, No. 1, 20271–20278. DOI:
+   [10.48084/etasr.9629](https://doi.org/10.48084/etasr.9629).
+3. Syihabuddin, E. R., Angela, W., Naufal, M., dan Pramunendar, R. A. (2025).
+   *Pengenalan Plat Nomor Kendaraan dengan YOLOv8 dan PaddleOCR*. **Journal of
+   Computer Science and Technology (JCS-TECH)**, Vol. 5, No. 2, 66–72. DOI:
+   [10.54840/jcstech.v5i2.374](https://doi.org/10.54840/jcstech.v5i2.374).
+4. Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor
    Kendaraan Menggunakan Algoritma Convolutional Neural Network Berbasis
    Tensorflow*. **Remik: Riset dan E-Jurnal Manajemen Informatika Komputer**,
    Vol. 9, No. 3, Agustus 2025. DOI:
    [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169)
-   [PDF](artc/15169-Article%20Text-24310-1-10-20250811.pdf) — ANPR dengan
-   CNN LeNet-5 (akurasi 89,86% pada 50 citra); rekomendasi pemisahan klasifikasi
-   per blok (huruf awal / angka / huruf akhir) sejalan dengan aturan NRKB yang
-   diterapkan sistem ini. *(Salinan duplikat:
-   `15169-Article Text-24310-1-10-20250811 (1).pdf`.)*
-3. Forum Komunitas Axelera AI. *Home Assistant CCTV Object and Motion Detection
-   Using Metis*. [community.axelera.ai](https://community.axelera.ai/the-axelera-forum-52/home-assistant-cctv-object-and-motion-detection-using-metis-1226) ·
-   [`axelera-ai-hub/voyager-sdk`](https://github.com/axelera-ai-hub/voyager-sdk) ·
-   [`graffitiwriter/Metis-for-Home-Assistant-Motion-Detection`](https://github.com/graffitiwriter/Metis-for-Home-Assistant-Motion-Detection) —
-   offload deteksi CCTV ke NPU Axelera Metis (~30 FPS, ±196 ms), zona deteksi
-   per-koordinat, dan cascaded pipeline Voyager SDK untuk pengenalan plat
-   (opsi percepatan bila target < 1 detik per kendaraan).
+   [PDF](artc/15169-Article%20Text-24310-1-10-20250811.pdf).
+5. Salsabila, N., dan Sriani. (2024). *Enhancing Automated Vehicle License Plate
+   Recognition with YOLOv8 and EasyOCR*. **Journal of Information Systems and
+   Informatics (Journal ISI)**, Vol. 6, No. 3, 1577–1597. DOI:
+   [10.51519/journalisi.v6i3.848](https://doi.org/10.51519/journalisi.v6i3.848).
+6. Haidar, M. A., dan Arifin, F. (2024). *Evaluation of YOLOv8 Algorithm
+   for Vehicle License Plate Detection System in UNY Integrated Parking Lot*.
+   **ELINVO**, Vol. 9, No. 2, 220–229. DOI:
+   [10.21831/elinvo.v9i2.70032](https://doi.org/10.21831/elinvo.v9i2.70032).
+7. Chandrawan, M. A., dkk. (2024). *Design and Build an Automatic AI-IoT Parking
+   Barrier Management System Using YOLO & OCR*. **JTRISTE**, Vol. 10, No. 1,
+   41–49. DOI: [10.55645/jtriste.v10i1.389](https://doi.org/10.55645/jtriste.v10i1.389).
+8. Iriawan, A. D., dan Sunyoto, A. (2023). *Automatic License Plate Recognition
+   System in Indonesia Using YOLOv8 and EasyOCR Algorithm*. **2023 6th
+   International Conference on Information and Communications Technology
+   (ICOIACT)**, IEEE, 384–388. DOI:
+   [10.1109/ICOIACT59844.2023.10455908](https://doi.org/10.1109/ICOIACT59844.2023.10455908).
+9. Peraturan Kepolisian Negara Republik Indonesia Nomor 7 Tahun 2021 tentang
+   Registrasi dan Identifikasi Kendaraan Bermotor.

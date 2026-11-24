@@ -59,11 +59,10 @@ VARIANTS: dict[str, str] = {
     "yolo11n": "runs/detect/smartgate-colab-v6-yolo11n/weights/best.pt",
     "yolov8n": "runs/detect/smartgate-colab-v6-yolov8n/weights/best.pt",
 }
-FALLBACK_WEIGHTS = (
-    "runs/detect/smartgate-colab-v5/weights/best.pt",
-    "runs/detect/runs/detect/smartgate/weights/best.pt",
-    "runs/detect/runs/detect/smartgate-full/weights/best.pt",
-)
+ARTIFACT_FALLBACKS: dict[str, Path] = {
+    "yolo11n": config.REPO_ROOT / "smartgate-artifacts-Y11N" / "best.pt",
+    "yolov8n": config.REPO_ROOT / "smartgate-artifacts-Y8N" / "best.pt",
+}
 _raw_variant = os.getenv(VARIANT_ENV, "yolov8n").strip()
 _variant: str = _raw_variant if _raw_variant in VARIANTS else "yolov8n"
 
@@ -89,13 +88,17 @@ def available_variants() -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for name, relative in VARIANTS.items():
         candidate = base / relative
-        ready = candidate.is_file()
+        artifact_candidate = ARTIFACT_FALLBACKS[name]
+        active_file = candidate if candidate.is_file() else (artifact_candidate if artifact_candidate.is_file() else candidate)
+        ready = active_file.is_file()
         info: dict[str, Any] = {
-            "weights": str(candidate),
+            "weights": str(active_file),
             "ready": ready,
-            "size_mb": round(candidate.stat().st_size / 1e6, 1) if ready else 0,
+            "size_mb": round(active_file.stat().st_size / 1e6, 1) if ready else 0,
         }
         summary_path = candidate.parent.parent / "evaluation_summary.json"
+        if not summary_path.is_file():
+            summary_path = artifact_candidate.parent / "evaluation_summary.json"
         if summary_path.is_file():
             try:
                 summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -114,13 +117,17 @@ def available_variants() -> dict[str, dict[str, Any]]:
 
 
 def _default_weights() -> Path | None:
-    """Pilih bobot training lokal: varian aktif dulu, lalu kandidat lain."""
+    """Pilih bobot training v6: varian aktif di runs/detect atau langsung dari smartgate-artifacts-*."""
     base = Path(__file__).resolve().parent.parent
-    relatives = [VARIANTS[_variant]]
-    relatives += [rel for name, rel in VARIANTS.items() if name != _variant]
-    relatives += [rel for rel in FALLBACK_WEIGHTS if rel not in relatives]
-    for relative in relatives:
-        candidate = base / relative
+    candidates: list[Path] = [
+        base / VARIANTS[_variant],
+        ARTIFACT_FALLBACKS[_variant],
+    ]
+    for name in VARIANTS:
+        if name != _variant:
+            candidates.append(base / VARIANTS[name])
+            candidates.append(ARTIFACT_FALLBACKS[name])
+    for candidate in candidates:
         if candidate.is_file():
             return candidate
     return None
@@ -137,18 +144,27 @@ def weights_path() -> Path | None:
 
 @lru_cache(maxsize=1)
 def _model() -> Any | None:
-    """Muat model sekali saja (lru_cache). ``None`` bila belum bisa dipakai."""
+    """Muat model sekali saja (lru_cache) & panaskan layer fusion. ``None`` bila belum bisa dipakai."""
     path = weights_path()
     if path is None:
         return None
     try:
         from ultralytics import YOLO
+        import numpy as np
         import torch
 
         torch.set_num_threads(config.CPU_THREADS)
     except ImportError:
         return None
-    return YOLO(str(path))
+    yolo = YOLO(str(path))
+    try:
+        # Panggilan predict pertama melakukan Conv+BN fusion (~1,5-2 dtk di CPU);
+        # lakukan saat warmup agar scan pertama pengguna langsung cepat.
+        dummy = np.zeros((160, 160, 3), dtype=np.uint8)
+        yolo.predict(dummy, conf=DEFAULT_CONF, imgsz=160, verbose=False)
+    except Exception:  # noqa: BLE001
+        pass
+    return yolo
 
 
 def available() -> bool:
@@ -226,29 +242,31 @@ def detect(image: Any, max_candidates: int = 4) -> list[Detection]:
             continue
         border = plate_border_score(crop)  # bingkai plat pada box penuh, sebelum snap
         texture_ok = plate_texture_ok(crop)
+        det_conf = float(box.conf[0])
+        # Persempit vertikal ke pita teks terlebih dahulu (keep_horizontal=True)
+        # agar bingkai hitam holder plat di atas/bawah tidak merusak hitungan glyph.
+        text_band, _ = snap_to_text_band(crop, keep_horizontal=True)
         vehicle_class, orientation, glyphs, plausibility = plate_plausibility(crop)
+        if getattr(text_band, "size", 0):
+            vc2, ori2, gl2, pl2 = plate_plausibility(text_band)
+            if pl2 > plausibility:
+                vehicle_class, orientation, glyphs, plausibility = vc2, ori2, gl2, pl2
+            crop = text_band
         min_aspect, max_aspect = ASPECT_RANGES.get(
             vehicle_class, ASPECT_RANGES["custom"]
         )
         box_aspect = (x2 - x1) / max(y2 - y1, 1.0)
         if not min_aspect <= box_aspect <= max_aspect:
             continue
-        # Confidence YOLO saja tidak cukup: gril/emblem sering berbentuk
-        # persegi panjang dan dapat diberi confidence tinggi oleh model lama.
-        # Kandidat tanpa struktur karakter tidak boleh diteruskan ke OCR.
+        # Bila YOLO sangat yakin (det_conf >= 0.45) dan tekstur plat valid,
+        # jangan pernah membuang box YOLO hanya karena proyeksi Otsu gagal menghitung glyph.
         if plausibility < MIN_PLAUSIBILITY:
+            if det_conf >= 0.45 and texture_ok:
+                plausibility = round(det_conf * 0.85, 4)
+            else:
+                continue
+        if not texture_ok and plausibility < 0.35 and det_conf < 0.50:
             continue
-        # Webcam frame kecil/gelap dapat gagal pada ambang tekstur meskipun
-        # model dan struktur glyph sudah menunjuk ke plat. Tetap tolak kandidat
-        # tanpa glyph, tetapi jangan menggugurkan plat valid hanya karena kontras.
-        if not texture_ok and plausibility < 0.35:
-            continue
-        # Bobot hasil training kadang mengurung sedikit bagian vertikal atas/bawah
-        # papan plat. Persempit vertikal ke pita teks, tetapi jaga batas horizontal
-        # YOLO (keep_horizontal=True) agar huruf prefix/suffix di tepi tidak terpotong.
-        text_band, _ = snap_to_text_band(crop, keep_horizontal=True)
-        if getattr(text_band, "size", 0):
-            crop = text_band
         # Quad overlay sengaja TIDAK dirapatkan ke pita teks: kotak yang berubah
         # tiap frame (loncat-loncat) membingungkan petugas dan tampak memotong
         # papan plat. Konteks bodi tetap dibuang oleh snap pada ocr_crop di bawah.
@@ -262,7 +280,7 @@ def detect(image: Any, max_candidates: int = 4) -> list[Detection]:
         detection = Detection(
                 kind="plate",
                 quad=[[float(x), float(y)] for x, y in quad],
-                confidence=round(plausibility, 4),
+                confidence=round(max(plausibility, det_conf), 4),
                 crop=normalize_plate_size(ocr_crop),
                 meta={
                     "raw_crop": ocr_crop,
@@ -272,12 +290,12 @@ def detect(image: Any, max_candidates: int = 4) -> list[Detection]:
                     "vehicle_class": vehicle_class,
                     "orientation": orientation,
                     "glyph_count": glyphs,
-                    "detector_conf": round(float(box.conf[0]), 4),
+                    "detector_conf": round(det_conf, 4),
                     "class_id": class_id,
                     "box_aspect": round(box_aspect, 4),
                     "backend": "yolo",
                 },
             )
-        candidates.append((float(box.conf[0]), detection))
+        candidates.append((det_conf, detection))
     candidates.sort(key=lambda item: item[0], reverse=True)
     return [detection for _, detection in candidates[:max_candidates]]

@@ -10,11 +10,8 @@ Hasil OCR yang melanggar tata bahasa plat Indonesia ditolak keras (dianggap tida
 
 | Path | Isi & Peran |
 | :--- | :--- |
-| [`docs/`](docs/) | Spesifikasi arsitektur produksi & laporan: [PRD](docs/PRD.md), [TECHNICAL](docs/TECHNICAL.md), [SYSTEM_FLOW](docs/SYSTEM_FLOW.md), [API](docs/API.md), [DATABASE](docs/DATABASE.md), [PRESENTASI](docs/PRESENTASI.md), [LAPORAN_KP_TEMUAN](docs/LAPORAN_KP_TEMUAN.md) |
+| [`docs/`](docs/) | Seluruh dokumentasi & laporan (`.md`) + daftar pustaka Mendeley: [PRD](docs/PRD.md), [TECHNICAL](docs/TECHNICAL.md), [SYSTEM_FLOW](docs/SYSTEM_FLOW.md), [API](docs/API.md), [DATABASE](docs/DATABASE.md), [PRESENTASI](docs/PRESENTASI.md), [LAPORAN_KP_TEMUAN](docs/LAPORAN_KP_TEMUAN.md), [TUGAS_PENGOLAHAN_CITRA_DIGITAL](docs/TUGAS_PENGOLAHAN_CITRA_DIGITAL.md), [TRAINING_GUIDE](docs/TRAINING_GUIDE.md), dan [SmartGateSystem-audit-report](docs/SmartGateSystem-audit-report.md) |
 | [`Tugas Citra Digital/prototype/`](Tugas%20Citra%20Digital/prototype/) | **Aplikasi utama (Flask Prototype)**: pipeline pengolahan citra, detektor YOLO/OpenCV, engine OCR + normalisasi NRKB, dashboard satpam, kamera live, dan test suite |
-| [`Tugas Citra Digital/TUGAS_PENGOLAHAN_CITRA_DIGITAL.md`](Tugas%20Citra%20Digital/TUGAS_PENGOLAHAN_CITRA_DIGITAL.md) | Laporan akademik pengolahan citra digital & evaluasi eksperimen |
-| [`SmartGateSystem-audit-report.md`](SmartGateSystem-audit-report.md) | **Laporan Audit Menyeluruh**: keamanan, efisiensi CPU & RAM, serta analisis akurasi pengenalan plat, huruf, dan angka |
-| [`part2-remediation.md`](part2-remediation.md) | Panduan langkah-langkah remediasi keamanan & infrastruktur |
 | `smartgate-artifacts-*/` | Artefak hasil training Colab/Kaggle (`best.pt`, `best.onnx`, `evaluation_summary.json`, `results.csv`, `confusion_matrix.png`) untuk YOLOv8n dan YOLOv11n |
 
 ---
@@ -112,7 +109,7 @@ Kedua model dilatih dengan protokol **5-Fold Stratified Group Cross-Validation (
 
 ### Strategi Generalisasi & Cross-Validation (Mitigasi Degradasi Model)
 
-Untuk mengatasi fenomena *model degradation* (penurunan akurasi pada kamera nyata / overfitting di paruh akhir epoch akibat ketimpangan split `3.982 train : 84 val : 84 test`), pipeline pelatihan mendukung peningkatan **Generalization** dan **Cross-Validation** berikut (detail analisis di [`SmartGateSystem-audit-report.md`](SmartGateSystem-audit-report.md#4-audit-khusus-iii-degradasi-model-training-generalisasi--cross-validation) dan panduan teknis di [`TRAINING_GUIDE.md`](Tugas%20Citra%20Digital/prototype/TRAINING_GUIDE.md)):
+Untuk mengatasi fenomena *model degradation* (penurunan akurasi pada kamera nyata / overfitting di paruh akhir epoch akibat ketimpangan split `3.982 train : 84 val : 84 test`), pipeline pelatihan mendukung peningkatan **Generalization** dan **Cross-Validation** berikut (detail analisis di [`docs/SmartGateSystem-audit-report.md`](docs/SmartGateSystem-audit-report.md#4-audit-khusus-iii-degradasi-model-training-generalisasi--cross-validation) dan panduan teknis di [`docs/TRAINING_GUIDE.md`](docs/TRAINING_GUIDE.md)):
 
 1. **5-Fold Stratified Group Cross-Validation (`K=5`)**:
    - Mengelompokkan gambar dengan *perceptual hash* (`dHash` 64-bit) agar frame berurutan dari kendaraan yang sama tidak bocor antar-fold (*GroupKFold*), sekaligus menjaga proporsi sumber domain (`plat-nomor`, `rf_`, `kg_`, `mg_`, `bg_`) dan skala ukuran bbox plat di setiap fold (~830 gambar validasi multi-domain per fold).
@@ -137,7 +134,7 @@ Pada perangkat CPU standar tanpa GPU diskrit (diuji pada Intel Core i5-8250U, 4C
 
 ### Ringkasan Temuan Audit & Status Remediasi Terbaru (23 November 2026)
 
-Detail lengkap hasil pengecekan menyeluruh terhadap efisiensi CPU/RAM, akurasi pengenalan plat/huruf/angka, serta strategi pelatihan model terdokumentasi di **[`SmartGateSystem-audit-report.md`](SmartGateSystem-audit-report.md)**:
+Detail lengkap hasil pengecekan menyeluruh terhadap efisiensi CPU/RAM, akurasi pengenalan plat/huruf/angka, serta strategi pelatihan model terdokumentasi di **[`docs/SmartGateSystem-audit-report.md`](docs/SmartGateSystem-audit-report.md)**:
 
 1. **[SELESAI DIIMPLEMENTASIKAN ✅] Fungsi Pengenalan Plat, Huruf & Angka Sesuai Perpol No. 7 Tahun 2021 (`OCR-1` s.d. `OCR-7`, `OCR-10`, `OCR-11`)**:
    - **Bebas Bias Wilayah (`OCR-1`)**: Menghapus pemetaan `"L" -> "D"` pada `_PREFIX_FIX` dan menjaga kode wilayah yang sudah terdaftar di `VALID_PREFIXES` (plat Surabaya `L`, Aceh `BL`, dan Sulut `DL` tidak lagi berubah menjadi `D`, `BD`, `DD`), serta menambahkan kode wilayah Papua baru (`PG`, `PS`, `PT`, `PY`).
@@ -193,13 +190,20 @@ python tools\eval_dataset.py --split valid,test
 python tools\eval_real.py --part both --limit 200
 ```
 
-Panduan pelatihan ulang di Google Colab / Kaggle tersedia di [`TRAINING_GUIDE.md`](Tugas%20Citra%20Digital/prototype/TRAINING_GUIDE.md).
+Panduan pelatihan ulang di Google Colab / Kaggle tersedia di [`docs/TRAINING_GUIDE.md`](docs/TRAINING_GUIDE.md).
 
 ---
 
-## Referensi
+## Referensi (Terdaftar di Mendeley / Crossref / Scopus — 5 Tahun Terakhir: 2021–2026)
 
-- Harani, N. H., Prianto, C., dan Hasanah, M. (2019). *Deteksi Objek dan Pengenalan Karakter Plat Nomor Kendaraan Indonesia Menggunakan Metode Convolutional Neural Network (CNN) Berbasis Python*. Jurnal Teknik Informatika, Vol. 11, No. 3. [PDF](docs/artc/658-Article%20Text-963-1-10-20200213.pdf)
-- Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor Kendaraan Menggunakan Algoritma Convolutional Neural Network Berbasis Tensorflow*. Remik: Riset dan E-Jurnal Manajemen Informatika Komputer, Vol. 9, No. 3. DOI: [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169). [PDF](docs/artc/15169-Article%20Text-24310-1-10-20250811.pdf)
+> File siap impor langsung ke **Mendeley Reference Manager**: [`docs/references_mendeley.ris`](docs/references_mendeley.ris) dan [`docs/references_mendeley.bib`](docs/references_mendeley.bib).
+
 - Ramadhani, A. D., dkk. (2026). *Analisis Akurasi Pembacaan Karakter Plat Nomor Kendaraan Indonesia Menggunakan YOLOv8 dan EasyOCR*. Jurnal Teknika, Vol. 18, No. 2, 147–154. DOI: [10.30736/jt.v18i2.1604](https://doi.org/10.30736/jt.v18i2.1604).
-- Forum Komunitas Axelera AI, [*Home Assistant CCTV Object and Motion Detection Using Metis*](https://community.axelera.ai/the-axelera-forum-52/home-assistant-cctv-object-and-motion-detection-using-metis-1226) · [`axelera-ai-hub/voyager-sdk`](https://github.com/axelera-ai-hub/voyager-sdk) · [`graffitiwriter/Metis-for-Home-Assistant-Motion-Detection`](https://github.com/graffitiwriter/Metis-for-Home-Assistant-Motion-Detection) — referensi NPU (Axelera Metis), zona deteksi, dan cascaded pipeline LPR.
+- Sutikno, Sugiharto, A., dan Kusumaningrum, R. (2025). *Enhanced Automatic License Plate Detection and Recognition using CLAHE and YOLOv11 for Seat Belt Compliance Detection*. Engineering, Technology & Applied Science Research (ETASR), Vol. 15, No. 1, 20271–20278. DOI: [10.48084/etasr.9629](https://doi.org/10.48084/etasr.9629).
+- Syihabuddin, E. R., Angela, W., Naufal, M., dan Pramunendar, R. A. (2025). *Pengenalan Plat Nomor Kendaraan dengan YOLOv8 dan PaddleOCR*. Journal of Computer Science and Technology (JCS-TECH), Vol. 5, No. 2, 66–72. DOI: [10.54840/jcstech.v5i2.374](https://doi.org/10.54840/jcstech.v5i2.374).
+- Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor Kendaraan Menggunakan Algoritma Convolutional Neural Network Berbasis Tensorflow*. Remik: Riset dan E-Jurnal Manajemen Informatika Komputer, Vol. 9, No. 3. DOI: [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169). [PDF](docs/artc/15169-Article%20Text-24310-1-10-20250811.pdf)
+- Salsabila, N., dan Sriani. (2024). *Enhancing Automated Vehicle License Plate Recognition with YOLOv8 and EasyOCR*. Journal of Information Systems and Informatics (Journal ISI), Vol. 6, No. 3, 1577–1597. DOI: [10.51519/journalisi.v6i3.848](https://doi.org/10.51519/journalisi.v6i3.848).
+- Haidar, M. A., dan Arifin, F. (2024). *Evaluation of YOLOv8 Algorithm for Vehicle License Plate Detection System in UNY Integrated Parking Lot*. ELINVO (Electronics, Informatics, and Vocational Education), Vol. 9, No. 2, 220–229. DOI: [10.21831/elinvo.v9i2.70032](https://doi.org/10.21831/elinvo.v9i2.70032).
+- Chandrawan, M. A., dkk. (2024). *Design and Build an Automatic AI-IoT Parking Barrier Management System Using YOLO & OCR*. JTRISTE, Vol. 10, No. 1, 41–49. DOI: [10.55645/jtriste.v10i1.389](https://doi.org/10.55645/jtriste.v10i1.389).
+- Iriawan, A. D., dan Sunyoto, A. (2023). *Automatic License Plate Recognition System in Indonesia Using YOLOv8 and EasyOCR Algorithm*. 2023 6th International Conference on Information and Communications Technology (ICOIACT), IEEE, 384–388. DOI: [10.1109/ICOIACT59844.2023.10455908](https://doi.org/10.1109/ICOIACT59844.2023.10455908).
+- Peraturan Kepolisian Negara Republik Indonesia Nomor 7 Tahun 2021 tentang Registrasi dan Identifikasi Kendaraan Bermotor.

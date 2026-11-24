@@ -3,7 +3,7 @@
 > Dari awal sampai akhir: bagaimana satu kendaraan dikenali, diputuskan, dan
 > dicatat — dalam bahasa yang mudah dipahami.
 > Pendamping teknis: [TECHNICAL](TECHNICAL.md) · [SYSTEM_FLOW](SYSTEM_FLOW.md) ·
-> panduan training: [TRAINING_GUIDE](../Tugas%20Citra%20Digital/prototype/TRAINING_GUIDE.md)
+> panduan training: [TRAINING_GUIDE](TRAINING_GUIDE.md)
 
 ---
 
@@ -16,9 +16,9 @@ rawan salah catat, dan tidak ada jejak audit.
 mencocokkannya dengan database kendaraan, lalu membuka gerbang otomatis —
 dengan satpam tetap memegang kendali penuh.
 
-**Hasil:** Akurasi deteksi Test mAP50 **96,83%** (YOLOv11n), waktu deteksi
-**±100 ms per frame**, satu scan penuh plat **±1,4 detik**, dan seluruh
-keputusan tercatat dalam log audit.
+**Hasil:** Akurasi deteksi Test Hold-out mAP50 **96,93%** (YOLOv11n, bobot `5,48 MB`),
+Valid Format OCR Rate **75,96%** dengan latensi rata-rata **76,50 ms** (YOLOv8n, bobot `6,48 MB`),
+kepatuhan penuh **Perpol No. 7 Tahun 2021**, dan seluruh keputusan tercatat dalam log audit.
 
 **Prinsip utama:** *sistem tidak pernah membuka gerbang bila ragu* (fail-safe).
 
@@ -117,14 +117,16 @@ cocok** gerbang membuka sendiri. Selain itu, satpam yang memutuskan.
 
 ---
 
-## 6. Hasil & Kejujuran Angka
+## 6. Hasil & Kejujuran Angka (Eksperimen v6 Multi-Domain Fold 0)
 
-| Metrik | Nilai |
-| --- | ---: |
-| Validation mAP50 | 93,61% |
-| **Test mAP50** | **96,83%** |
-| Latency rata-rata / P95 | 99,63 ms / 192,41 ms |
-| Format plat terbaca benar | 75,00% (87/116) |
+| Metrik | YOLOv8n (`v6-yolov8n`) | YOLOv11n (`v6-yolo11n`) |
+| --- | ---: | ---: |
+| Validation Fold 0 mAP50 *(multi-domain ~813 citra)* | **84,88%** | 84,64% |
+| **Test Hold-out mAP50** *(84 citra)* | 96,17% | **96,93%** |
+| Test Hold-out mAP50-95 | 59,31% | **61,50%** |
+| **Format plat OCR valid (Perpol 7/2021)** | **75,96% (79/104)** | 74,07% (80/108) |
+| Latency rata-rata / P95 | **76,50 ms / 157,19 ms** | 87,43 ms / 161,03 ms |
+| Ukuran Bobot `.pt` / `.onnx` | 6,48 MB / 12,77 MB | **5,48 MB / 10,66 MB** |
 
 **Target 98% belum tercapai — dan itu disampaikan apa adanya.** Pelatihan
 berhenti wajar di epoch 50 tanpa overfitting ekstrem; menambah epoch tidak akan
@@ -177,14 +179,12 @@ plat penuh (YOLO + OCR) ±1,4 detik. Optimasi crop-only CLAHE, frame skipping,
 pembatasan thread CPU, dan jalur cepat OCR (recognizer tanpa deteksi teks)
 menjaga scan tetap di bawah 2 detik.
 
-**Q: Kenapa YOLOv11n, bukan yang paling besar (v8x)?**
-Kami membandingkan tiga arsitektur pada dataset dan konfigurasi yang sama:
-YOLOv8n, YOLOv8x, dan YOLOv11n. Hasilnya, YOLOv11n (paling ringan, 5,5 MB)
-justru unggul keseluruhan — Test mAP50 0,9683, valid-format OCR 75%, latensi
-setara v8n. YOLOv8x unggul tipis di deteksi atas v8n tetapi OCR-nya paling
-tidak stabil dan 2× lebih lambat. Konsisten dengan Ramadhani dkk. (2026):
-akurasi deteksi tidak otomatis berarti akurasi OCR lebih baik. Ketiganya bisa
-dibandingkan langsung di aplikasi lewat pemilih model di `/training`.
+**Q: Kenapa memilih model ringan (YOLOv11n & YOLOv8n), bukan model besar?**
+Model *nano* generasi baru (**YOLOv11n**, `5,48 MB`) mencapai **Test mAP50 96,93%**,
+sedangkan **YOLOv8n** (`6,48 MB`) mencapai **Valid Format OCR 75,96%** dengan latensi
+**76,50 ms** — jauh lebih cepat dan hemat RAM di CPU standar tanpa GPU. Konsisten
+dengan Ramadhani dkk. (2026): akurasi deteksi tidak otomatis berarti akurasi OCR
+lebih baik. Keduanya dapat dibandingkan langsung di aplikasi lewat pemilih model di `/training`.
 
 ---
 
@@ -212,17 +212,16 @@ berulang, satpam memegang keputusan penting, dan setiap tindakan tercatat.
 
 ---
 
-## 11. Referensi
+## 11. Referensi (Terdaftar di Mendeley / Crossref / Scopus — 5 Tahun Terakhir: 2021–2026)
 
-- Harani, N. H., Prianto, C., dan Hasanah, M. (2019). *Deteksi Objek dan
-  Pengenalan Karakter Plat Nomor Kendaraan Indonesia Menggunakan Metode CNN
-  Berbasis Python*. Jurnal Teknik Informatika, Vol. 11, No. 3.
-  [PDF](artc/658-Article%20Text-963-1-10-20200213.pdf)
-- Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor
-  Kendaraan Menggunakan Algoritma CNN Berbasis Tensorflow*. Remik, Vol. 9,
-  No. 3. DOI: [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169).
-  [PDF](artc/15169-Article%20Text-24310-1-10-20250811.pdf)
-- Forum Komunitas Axelera AI, [*Home Assistant CCTV Object and Motion Detection
-  Using Metis*](https://community.axelera.ai/the-axelera-forum-52/home-assistant-cctv-object-and-motion-detection-using-metis-1226) ·
-  [`axelera-ai-hub/voyager-sdk`](https://github.com/axelera-ai-hub/voyager-sdk) —
-  referensi NPU untuk pengembangan lanjutan (target < 1 detik per kendaraan).
+> File siap impor 1-klik ke **Mendeley Reference Manager**: [`references_mendeley.ris`](references_mendeley.ris) dan [`references_mendeley.bib`](references_mendeley.bib).
+
+- Ramadhani, A. D., dkk. (2026). *Analisis Akurasi Pembacaan Karakter Plat Nomor Kendaraan Indonesia Menggunakan YOLOv8 dan EasyOCR*. Jurnal Teknika, Vol. 18, No. 2, 147–154. DOI: [10.30736/jt.v18i2.1604](https://doi.org/10.30736/jt.v18i2.1604).
+- Sutikno, Sugiharto, A., dan Kusumaningrum, R. (2025). *Enhanced Automatic License Plate Detection and Recognition using CLAHE and YOLOv11 for Seat Belt Compliance Detection*. ETASR, Vol. 15, No. 1, 20271–20278. DOI: [10.48084/etasr.9629](https://doi.org/10.48084/etasr.9629).
+- Syihabuddin, E. R., Angela, W., Naufal, M., dan Pramunendar, R. A. (2025). *Pengenalan Plat Nomor Kendaraan dengan YOLOv8 dan PaddleOCR*. JCS-TECH, Vol. 5, No. 2, 66–72. DOI: [10.54840/jcstech.v5i2.374](https://doi.org/10.54840/jcstech.v5i2.374).
+- Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor Kendaraan Menggunakan Algoritma CNN Berbasis Tensorflow*. Remik, Vol. 9, No. 3. DOI: [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169). [PDF](artc/15169-Article%20Text-24310-1-10-20250811.pdf)
+- Salsabila, N., dan Sriani. (2024). *Enhancing Automated Vehicle License Plate Recognition with YOLOv8 and EasyOCR*. Journal ISI, Vol. 6, No. 3, 1577–1597. DOI: [10.51519/journalisi.v6i3.848](https://doi.org/10.51519/journalisi.v6i3.848).
+- Haidar, M. A., dan Arifin, F. (2024). *Evaluation of YOLOv8 Algorithm for Vehicle License Plate Detection System in UNY Integrated Parking Lot*. ELINVO, Vol. 9, No. 2, 220–229. DOI: [10.21831/elinvo.v9i2.70032](https://doi.org/10.21831/elinvo.v9i2.70032).
+- Chandrawan, M. A., dkk. (2024). *Design and Build an Automatic AI-IoT Parking Barrier Management System Using YOLO & OCR*. JTRISTE, Vol. 10, No. 1, 41–49. DOI: [10.55645/jtriste.v10i1.389](https://doi.org/10.55645/jtriste.v10i1.389).
+- Iriawan, A. D., dan Sunyoto, A. (2023). *Automatic License Plate Recognition System in Indonesia Using YOLOv8 and EasyOCR Algorithm*. IEEE 6th ICOIACT, 384–388. DOI: [10.1109/ICOIACT59844.2023.10455908](https://doi.org/10.1109/ICOIACT59844.2023.10455908).
+- Peraturan Kepolisian Negara Republik Indonesia Nomor 7 Tahun 2021 tentang Registrasi dan Identifikasi Kendaraan Bermotor.

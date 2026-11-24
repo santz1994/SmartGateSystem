@@ -647,6 +647,41 @@ def test_security_and_cleanup_polish() -> None:
     check("reset catatan gagal login membuka blokir setelah sukses (SEC-1)", not web._login_rate_limited(test_ip))
 
 
+def test_real_plat_nomor_dataset() -> None:
+    print("pengujian otomatis dataset nyata (prototype/plat-nomor)")
+    from tools import eval_dataset
+
+    dataset_dir = eval_dataset.DEFAULT_DATASET
+    if not (dataset_dir / "test" / "images").is_dir():
+        print(f"  skip  folder dataset {dataset_dir} belum tersedia")
+        return
+
+    rep = eval_dataset.evaluate(
+        "test",
+        limit=10,
+        threshold=0.5,
+        quiet=True,
+        dataset_dir=dataset_dir,
+        with_ocr=True,
+    )
+    check("dataset plat-nomor/test berisi citra uji", rep["images"] == 10, f"(dapat {rep['images']})")
+    check(
+        "recall deteksi plat pada sampel plat-nomor/test >= 0.80",
+        rep["recall"] >= 0.80,
+        f"(P={rep['precision']}, R={rep['recall']}, F1={rep['f1']})",
+    )
+    check(
+        "median IoU lokalisasi pada sampel plat-nomor/test >= 0.65",
+        rep["iou_median"] >= 0.65,
+        f"(IoU median={rep['iou_median']})",
+    )
+    check(
+        "OCR menghasilkan format NRKB valid pada citra nyata plat-nomor/test",
+        rep["ocr_valid"] >= 5,
+        f"(valid={rep['ocr_valid']}/{rep['ocr_tested']}, contoh={rep['sample_reads'][:3]})",
+    )
+
+
 def main() -> int:
     tests = [
         test_normalize_plate,
@@ -664,6 +699,7 @@ def main() -> int:
         test_cpu_ram_optimizations,
         test_kfold_stratified_group_cv,
         test_security_and_cleanup_polish,
+        test_real_plat_nomor_dataset,
         test_signed_sticker_token,
         test_read_plate_robust,
         test_date_sticker_row,

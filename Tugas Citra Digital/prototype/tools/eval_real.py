@@ -20,22 +20,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from tools import dataset  # noqa: E402
-
-
-def box_iou(a, b) -> float:
-    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
-    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
-    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
-    if inter <= 0.0:
-        return 0.0
-    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
-    return inter / union if union > 0 else 0.0
-
-
-def quad_box(quad) -> tuple[float, float, float, float]:
-    xs = [float(p[0]) for p in quad]
-    ys = [float(p[1]) for p in quad]
-    return min(xs), min(ys), max(xs), max(ys)
+from tools.eval_dataset import iou as box_iou, quad_bounds as quad_box  # noqa: E402
 
 
 def eval_detect(limit: int | None, threshold: float) -> dict:

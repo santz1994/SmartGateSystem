@@ -460,23 +460,40 @@ def ink_glyph_count(crop: Any) -> int:
     """Perkiraan jumlah karakter lewat proyeksi vertikal.
 
     Dipakai sebagai gerbang anti false-positive: potongan aspal/kaca tidak punya
-    deretan 3+ komponen gelap sempit berjarak seragam.
+    deretan 3+ komponen gelap sempit berjarak seragam. Baris horizontal yang
+    terlalu penuh (> 60% lebar, mis. garis bingkai/holder plat di atas/bawah)
+    diabaikan dari proyeksi vertikal agar tidak menyambung seluruh huruf menjadi 1 blob.
     """
-    binary = _ink_mask(crop, trim_x=0.03, trim_y=0.10)
+    binary = _ink_mask(crop, trim_x=0.04, trim_y=0.12)
     h, w = binary.shape
     if h < 8 or w < 8:
         return 0
-    ink = (binary > 0).sum(axis=0)
-    threshold = max(1, int(h * 0.08))
-    count, in_run = 0, False
-    for value in ink:
-        if value > threshold:
-            if not in_run:
-                count += 1
-            in_run = True
-        else:
-            in_run = False
-    return count
+
+    def _count_runs(mask: Any) -> int:
+        mh, mw = mask.shape
+        if mh < 4 or mw < 8:
+            return 0
+        # Abaikan baris garis bingkai horizontal yang melintang > 60% lebar plat
+        row_fill = (mask > 0).mean(axis=1)
+        clean_rows = mask[row_fill <= 0.60]
+        if clean_rows.shape[0] < 4:
+            clean_rows = mask
+        ch = clean_rows.shape[0]
+        ink = (clean_rows > 0).sum(axis=0)
+        threshold = max(1, int(ch * 0.14))
+        count, in_run = 0, False
+        for value in ink:
+            if value > threshold:
+                if not in_run:
+                    count += 1
+                in_run = True
+            else:
+                in_run = False
+        return count
+
+    # Evaluasi mask penuh dan pita tengah utama (tanpa baris masa berlaku MMYY di bawah)
+    mid = binary[int(h * 0.08) : int(h * 0.72), :]
+    return max(_count_runs(binary), _count_runs(mid))
 
 def split_rows(crop: Any) -> list[Any]:
     """Pisahkan plat 1 baris vs 2 baris (proyeksi horizontal).
@@ -517,22 +534,22 @@ def split_rows(crop: Any) -> list[Any]:
         return [crop]
     return [crop[: best[0]], crop[best[0] + best[1] :]]
 
-def text_rows(crop: Any, min_height_frac: float = 0.10) -> list[Any]:
-    """Semua pita baris yang layak dibaca OCR, termasuk baris pendek.
+def text_rows(crop: Any, min_height_frac: float = 0.18) -> list[Any]:
+    """Semua pita baris teks yang layak dibaca OCR.
 
-    Berbeda dengan :func:`split_rows` (syaratnya ketat, khusus memutus plat
-    1 vs 2 baris), fungsi ini longgar: stiker tanggal "12 26" setinggi ~10 px
-    di bawah nomor plat harus ikut terpisah, karena bila seluruh crop dibaca
-    sebagai satu teks, stiker itulah yang menang dibaca — bukan nomor plat.
-    Pita tipis (border/bingkai) dibuang lewat ``min_height_frac``.
+    Baris garis bingkai horizontal (> 65% lebar penuh) dibersihkan dari proyeksi
+    agar bingkai atas/bawah holder plat tidak dianggap sebagai baris teks pertama.
     """
     binary = _ink_mask(crop, trim_x=0.06)
     h, w = binary.shape
-    if h < 16:
+    if h < 16 or w < 8:
         return [crop]
+    row_fill = (binary > 0).mean(axis=1)
     ink = (binary > 0).sum(axis=1)
-    threshold = max(1, int(w * 0.01))
-    min_height = max(4, int(h * min_height_frac))
+    # Nolkan baris bingkai hitam yang melintang > 65% lebar plat
+    ink = ink * (row_fill <= 0.65)
+    threshold = max(1, int(w * 0.02))
+    min_height = max(5, int(h * min_height_frac))
     bands: list[tuple[int, int]] = []
     start: int | None = None
     for y, value in enumerate(ink):

@@ -216,8 +216,7 @@ otomatis): `yolo11n` dan `yolov8n` — dipetakan di
 - Persistensi: `system_settings.yolo_variant` (dipulihkan saat aplikasi start).
 - Override lingkungan: `SGS_YOLO_VARIANT` (nama varian) atau `SGS_YOLO_WEIGHTS`
   (path bobot penuh, prioritas tertinggi).
-- Fallback aman: bobot varian belum ada → kandidat berikutnya (varian lain →
-  run V5 → run legacy).
+- Fallback aman: bobot varian belum disalin ke `runs/detect/` → otomatis memuat langsung dari `smartgate-artifacts-Y11N/best.pt` atau `smartgate-artifacts-Y8N/best.pt`.
 - Metrik evaluasi tiap varian (`evaluation_summary.json` di folder run)
   ditampilkan di `/training` untuk perbandingan kecepatan/ketepatan.
 

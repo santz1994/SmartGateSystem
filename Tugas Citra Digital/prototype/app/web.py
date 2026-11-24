@@ -61,17 +61,13 @@ def _record_login_failure(remote_addr: str) -> None:
 def _clear_login_failures(remote_addr: str) -> None:
     _LOGIN_FAILURES.pop(remote_addr or "local", None)
 
-# Run training YOLO — dipantau halaman /training. Pilih run terbaru otomatis
-# (Colab V5 pakai runs/detect/smartgate-colab-v5, training lama runs/detect/runs/detect/smartgate).
+# Run training YOLO — dipantau halaman /training. Pilih run terbaru otomatis.
 def _latest_train_run() -> Path:
     candidates = [
-        d.parent for d in config.BASE_DIR.glob("runs/detect/*/results.csv")
-    ] + [
-        d.parent for d in config.BASE_DIR.glob("runs/detect/runs/detect/*/results.csv")
+        d.parent for d in config.BASE_DIR.glob("runs/detect/*/results.csv") if d.parent.is_dir()
     ]
-    candidates = [d for d in candidates if d.is_dir()]
     if not candidates:
-        return config.BASE_DIR / "runs" / "detect" / "smartgate-colab-v5"
+        return config.BASE_DIR / "runs" / "detect" / "smartgate-colab-v6-yolo11n"
     return max(candidates, key=lambda d: (d / "results.csv").stat().st_mtime)
 
 

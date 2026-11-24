@@ -353,23 +353,26 @@ def _read_template_multiline(crop: Any) -> tuple[str, float]:
 # --- Backend: PaddleOCR -------------------------------------------------------
 
 @lru_cache(maxsize=1)
-def _paddle_reader():
-    # PaddlePaddle 3.x dapat memilih oneDNN secara otomatis pada CPU Windows.
-    # Beberapa operator PP-OCRv6 belum kompatibel dengan executor oneDNN dan
-    # menghasilkan NotImplementedError saat inferensi. Pakai executor CPU
-    # standar agar OCR tetap berjalan konsisten.
+def _configure_paddle_cpu() -> None:
+    """Matikan oneDNN/PIR pada CPU Windows untuk semua model PaddleOCR & PaddleX.
+
+    WAJIB dipanggil baik oleh ``_paddle_rec_model`` (jalur cepat) maupun
+    ``_paddle_reader`` (jalur penuh). Tanpa ini, ``_paddle_rec_model`` yang
+    dipanggil lebih dulu saat ``warmup()`` akan membuat predictor dengan oneDNN
+    aktif, melempar ``NotImplementedError`` saat ``predict()``, lalu jatuh diam-diam
+    ke ``_paddle_reader`` penuh (~2,9-3,5 dtk/panggilan).
+    """
     import os
 
     os.environ["FLAGS_use_mkldnn"] = "0"
     os.environ["FLAGS_enable_pir_api"] = "0"
-    from paddleocr import PaddleOCR  # type: ignore[import-untyped]
-    import paddle
+    try:
+        import paddle  # type: ignore[import-untyped]
 
-    paddle.set_flags({"FLAGS_use_mkldnn": False})
+        paddle.set_flags({"FLAGS_use_mkldnn": False})
+    except Exception:  # noqa: BLE001
+        pass
 
-    # Flag FLAGS_* belum cukup: prediktor statis paddlex tetap memakai oneDNN
-    # dan melempar NotImplementedError (ConvertPirAttribute2RuntimeAttribute).
-    # Paksa run_mode="paddle" (tanpa oneDNN) pada opsi prediktor.
     try:
         from paddlex.inference.models.runners.paddle_static.config.pp_option import (  # type: ignore[import-untyped]
             PaddlePredictorOption,
@@ -388,6 +391,12 @@ def _paddle_reader():
     except Exception:  # noqa: BLE001 - paddlex versi lain biarkan perilaku bawaan
         pass
 
+
+@lru_cache(maxsize=1)
+def _paddle_reader():
+    _configure_paddle_cpu()
+    from paddleocr import PaddleOCR  # type: ignore[import-untyped]
+
     try:
         return PaddleOCR(
             use_doc_orientation_classify=False,
@@ -404,6 +413,7 @@ def _paddle_reader():
 def _paddle_rec_model() -> Any | None:
     """Model recognizer saja (tanpa deteksi) untuk jalur cepat. ``None`` bila tak ada."""
     try:
+        _configure_paddle_cpu()
         from paddlex import create_model  # type: ignore[import-untyped]
 
         return create_model(model_name="PP-OCRv6_medium_rec")
@@ -436,7 +446,18 @@ def _read_paddle_rec_only(crop: Any) -> tuple[str, float]:
     if not texts:
         return "", 0.0
     confidence = sum(scores) / len(scores) if scores else 0.0
-    return best_plate_text(texts), round(confidence, 4)
+    return _extract_plate_or_suffix(texts), round(confidence, 4)
+
+
+def _extract_plate_or_suffix(texts: list[str]) -> str:
+    """Ambil kandidat plat terbaik atau token suffix 1-3 huruf untuk penggabungan plat 2 baris."""
+    plate_text = best_plate_text(texts)
+    if plate_text:
+        return plate_text
+    raw_clean = re.sub(r"[^A-Z0-9]", "", "".join(texts).upper())
+    if 1 <= len(raw_clean) <= 3 and not _DATE_LIKE.match(raw_clean):
+        return raw_clean.translate(_TO_ALPHA)
+    return ""
 
 def _reads_agree(a: str, b: str) -> bool:
     """Dua bacaan zoom dianggap sepakat bila sama, saling mengandung, atau
@@ -447,29 +468,32 @@ def _reads_agree(a: str, b: str) -> bool:
         return True
     return len(a) == len(b) and sum(x != y for x, y in zip(a, b)) <= 1
 
-def _read_paddle(crop: Any, *, allow_internal_zoom: bool = True) -> tuple[str, float]:
+def _read_paddle(
+    crop: Any, *, fast: bool = False, allow_internal_zoom: bool = True
+) -> tuple[str, float]:
     # Jalur cepat: recognizer tanpa deteksi teks. Crop sudah pita teks plat —
     # model deteksi justru memakan ~2,5 dari ~2,9 dtk per pembacaan di CPU uji.
-    # Hasil tidak berformat plat (multi-baris, crop salah) jatuh ke pipeline
-    # det+rec penuh di bawah — jalur cepat hanya mengambil alih bila jelas benar.
-    try:
-        text, confidence = _read_paddle_rec_only(crop)
-        if _looks_like_plate(text) and confidence >= 0.5:
-            if confidence >= 0.95 or not allow_internal_zoom:
+    rec_model = _paddle_rec_model()
+    if rec_model is not None:
+        try:
+            text, confidence = _read_paddle_rec_only(crop)
+            if _looks_like_plate(text) and confidence >= 0.5:
+                if confidence >= 0.95 or not allow_internal_zoom or fast:
+                    return text, confidence
+                cv2 = _cv2()
+                zoom = cv2.resize(crop, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+                text2, confidence2 = _read_paddle_rec_only(zoom)
+                if _reads_agree(text, text2):
+                    if len(text2) > len(text):
+                        text, confidence = text2, confidence2
+                    return text, round((confidence + confidence2) / 2, 4)
+            # Bila dipanggil dari tangga read_plate_robust (allow_internal_zoom=False)
+            # atau pada mode cepat (fast=True), JANGAN jatuh ke _paddle_reader().predict()
+            # (~2,9 dtk per sub-baris/varian) untuk setiap percobaan yang gagal!
+            if fast or not allow_internal_zoom:
                 return text, confidence
-            # Keyakinan sedang: cross-check zoom 2x. Bacaan salah yang
-            # "percaya diri" (blur/kecil, mis. H3239OK untuk plat H 3253 CK)
-            # hampir tidak pernah konsisten saat diperbesar — yang tidak
-            # sepakat jatuh ke pipeline det+rec penuh di bawah.
-            cv2 = _cv2()
-            zoom = cv2.resize(crop, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
-            text2, confidence2 = _read_paddle_rec_only(zoom)
-            if _reads_agree(text, text2):
-                if len(text2) > len(text):
-                    text, confidence = text2, confidence2
-                return text, round((confidence + confidence2) / 2, 4)
-    except Exception:  # noqa: BLE001 — jalur cepat opsional, gagal = pakai jalur penuh
-        pass
+        except Exception:  # noqa: BLE001 — jalur cepat opsional, gagal = pakai jalur penuh
+            pass
     reader = _paddle_reader()
     if hasattr(reader, "predict"):
         result = reader.predict(crop)
@@ -515,18 +539,23 @@ def _easy_reader():
 
     return easyocr.Reader(["en"], gpu=False, verbose=False)
 
-def _read_easyocr(crop: Any) -> tuple[str, float]:
+def _read_easyocr(
+    crop: Any, *, fast: bool = False, allow_internal_zoom: bool = True
+) -> tuple[str, float]:
     np = _np()
     reader = _easy_reader()
     # Jalur cepat: recognizer saja. Deteksi (CRAFT) dilewati karena crop sudah
-    # dipastikan pita teks plat oleh pipeline — hemat ~60% waktu. allowlist A-Z0-9
+    # dipastikan pita teks plat oleh pipeline — hemat ~85% waktu. allowlist A-Z0-9
     # sekaligus mencegah karakter di luar format plat.
-    fast = reader.recognize(crop, allowlist=_PLATE_ALLOW, detail=1)
-    if fast:
-        text = best_plate_text([item[1] if len(item) == 3 else item[0] for item in fast])
-        conf = float(np.mean([item[2] if len(item) == 3 else item[1] for item in fast]))
-        if len(re.sub(r"[^A-Z0-9]", "", text.upper())) >= 3 and conf >= 0.3:
-            return normalize_plate(text), round(min(conf, 0.99), 4)
+    rec_out = reader.recognize(crop, allowlist=_PLATE_ALLOW, detail=1)
+    if rec_out:
+        raw_items = [str(item[1] if len(item) == 3 else item[0]) for item in rec_out]
+        text = _extract_plate_or_suffix(raw_items)
+        conf = float(np.mean([item[2] if len(item) == 3 else item[1] for item in rec_out]))
+        if _looks_like_plate(text) and conf >= 0.65:
+            return (normalize_plate(text) or text), round(min(conf, 0.99), 4)
+        if 1 <= len(text) <= 3 and conf >= 0.65:
+            return text, round(min(conf, 0.99), 4)
 
     # Fallback: multi-baris (plat truk) atau hasil lemah -> deteksi penuh.
     results = reader.readtext(
@@ -571,7 +600,7 @@ def _read_easyocr(crop: Any) -> tuple[str, float]:
         rows = [max(boxes, key=lambda b: b[2])]
     # Urut baca: sejajar baseline (baris) dulu, baru kiri->kanan.
     rows.sort(key=lambda b: (b[0], b[1]))
-    text = best_plate_text([b[4] for b in rows])
+    text = _extract_plate_or_suffix([str(b[4]) for b in rows])
     confidence = float(np.mean([b[3] for b in rows]))
     return text, round(min(confidence, 0.99), 4)
 
@@ -584,7 +613,14 @@ _CACHE_TTL_SECONDS = 30.0
 
 def _looks_like_plate(text: str) -> bool:
     compact = re.sub(r"[^A-Z0-9]", "", (text or "").upper())
-    return bool(re.fullmatch(r"[A-Z]{1,2}[1-9][0-9]{0,3}[A-Z]{0,3}", compact))
+    if len(compact) < 4:
+        return False
+    # Plat dengan 3 blok lengkap Perpol 7/2021 ([Prefix 1-2 Huruf][Nomor 1-4 Angka][Seri 1-3 Huruf])
+    if re.fullmatch(r"[A-Z]{1,2}[1-9][0-9]{0,3}[A-Z]{1,3}", compact):
+        return True
+    # Plat tanpa seri huruf belakang minimal memiliki 5 karakter (mis. DD1407, B1234)
+    # agar fragmen pendek 2-3 karakter seperti 'B4' atau 'A22' tidak lolos sebagai plat valid.
+    return len(compact) >= 5 and bool(re.fullmatch(r"[A-Z]{1,2}[1-9][0-9]{2,3}", compact))
 
 def band_crops(crop: Any, count: int = 4, frac: float = 0.38) -> list[Any]:
     """Pita horizontal beririsan (zoom + crop otomatis saat belum terbaca).
@@ -714,19 +750,27 @@ def read_plate_robust(
             return False
         return good
 
-    # Baris dibaca terpisah lebih dulu. Stiker tanggal/masa berlaku di bawah
-    # baris plat punya kontras lebih tinggi dan selalu "menang" baca bila
-    # seluruh crop dipakai sebagai satu teks — kasus "yang terbaca malah tahun".
     rows = pipeline.text_rows(crop) if getattr(crop, "size", 0) else []
     if len(rows) > 1:
-        # Pertahankan2 baris terbesar dengan urutan vertikal (atas -> bawah)
-        # supaya plat 2 baris dapat menggabungkan prefix+angka (atas) dan seri (bawah).
         indexed_rows = sorted(
             enumerate(rows), key=lambda item: item[1].shape[0] * item[1].shape[1], reverse=True
         )[:2]
-        indexed_rows.sort(key=lambda item: item[0])
-        top_rows = [row for _, row in indexed_rows]
-        bases: list[tuple[Any, bool]] = [(r, True) for r in top_rows] + [(crop, False)]
+        largest_h = indexed_rows[0][1].shape[0]
+        second_h = indexed_rows[1][1].shape[0]
+        # Hanya urutkan atas->bawah bila kedua baris benar-benar sebanding tingginya
+        # (plat 2 baris truk/bus: second_h >= 0.50 * largest_h). Bila baris kedua jauh
+        # lebih pendek (stiker MMYY atau sisa bingkai), baca baris utama terbesar saja
+        # lebih dulu agar tidak membuang panggilan OCR pada potongan stiker/bingkai.
+        if second_h >= 0.50 * largest_h:
+            indexed_rows.sort(key=lambda item: item[0])
+            top_rows = [row for _, row in indexed_rows]
+            if fast:
+                bases: list[tuple[Any, bool]] = [(crop, False)] + [(r, True) for r in top_rows]
+            else:
+                bases = [(r, True) for r in top_rows] + [(crop, False)]
+        else:
+            main_row = indexed_rows[0][1]
+            bases = [(main_row, False), (crop, False)]
     else:
         bases = [(crop, False)]
 
@@ -764,6 +808,14 @@ def read_plate_robust(
         for variant in ladder:
             if attempt(variant):
                 break
+        # Fallback terakhir pada mode penuh (fast=False): bila seluruh tangga
+        # recognizer cepat belum menghasilkan plat valid, jalankan det+rec penuh
+        # (_paddle_reader) cukup 1 kali pada crop utuh.
+        if not fast and not _looks_like_plate(best[0]) and getattr(crop, "size", 0) > 0:
+            text, confidence, backend = read_plate(
+                crop, fast=False, allow_internal_zoom=True
+            )
+            _record(text, confidence, backend)
 
     if len(_ROBUST_CACHE) >= 32:
         _ROBUST_CACHE.pop(next(iter(_ROBUST_CACHE)))
@@ -789,19 +841,21 @@ def active_backend() -> str:
     return "template_match"
 
 def warmup() -> None:
-    """Muat model OCR di background saat server start — scan pertama tidak lambat.
+    """Muat & panaskan graf inferensi OCR di background saat server start.
 
-    Hanya model jalur cepat (``_paddle_rec_model``) atau backend aktif tunggal
-    yang dipanaskan (PERF-1). ``_paddle_reader`` penuh (deteksi + rekognisi kedua)
-    dan backend penyelamat (EasyOCR/PyTorch) dimuat malas hanya bila benar-benar
-    dibutuhkan agar dua recognizer tidak memakan RAM ganda sejak startup.
+    Menjalankan 1 inferensi dummy pada ``_paddle_rec_model`` agar kompilasi
+    graf statis CPU selesai di background, bukan pada scan pertama pengguna.
     """
     try:
+        np = _np()
+        dummy = np.full((48, 160, 3), 220, dtype=np.uint8)
         backend = active_backend()
         if backend == "easyocr":
             _easy_reader()
         elif backend == "paddleocr":
-            if _paddle_rec_model() is None:
+            if _paddle_rec_model() is not None:
+                _read_paddle_rec_only(dummy)
+            else:
                 _paddle_reader()
     except Exception:  # noqa: BLE001 - warmup gagal jangan menahan server
         pass
@@ -819,13 +873,17 @@ def read_plate(
     first = ("", 0.0, "template_match")
     if active_backend() == "paddleocr":
         try:
-            text, confidence = _read_paddle(crop, allow_internal_zoom=allow_internal_zoom)
+            text, confidence = _read_paddle(
+                crop, fast=fast, allow_internal_zoom=allow_internal_zoom
+            )
             first = (text, confidence, "paddleocr")
         except Exception:  # noqa: BLE001 - fallback tetap menjaga service hidup
             LOGGER.exception("PaddleOCR gagal membaca crop plat")
     elif active_backend() == "easyocr":
         try:
-            text, confidence = _read_easyocr(crop)
+            text, confidence = _read_easyocr(
+                crop, fast=fast, allow_internal_zoom=allow_internal_zoom
+            )
             first = (text, confidence, "easyocr")
         except Exception:  # noqa: BLE001 - jatuh ke template_match bila model belum ada
             pass

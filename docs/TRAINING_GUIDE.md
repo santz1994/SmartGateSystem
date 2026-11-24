@@ -222,52 +222,36 @@ Kesimpulan:
 2. **YOLOv8n unggul pada Valid Format OCR Rate (`75,96%`, naik dari `72,03%`) dan latensi (`76,50 ms`)** — menghasilkan *bounding box* yang sedikit lebih longgar untuk pembacaan karakter tepi OCR, konsisten dengan Ramadhani dkk. (2026).
 3. Keduanya dapat diuji dan ditukar langsung di aplikasi lewat **/training → Pilih Model Deteksi Aktif** (`runs/detect/smartgate-colab-v6-yolo11n/weights/best.pt` dan `runs/detect/smartgate-colab-v6-yolov8n/weights/best.pt`).
 
-Run **V5 `smartgate-colab-v5`** (Colab, YOLOv8n, 50 epoch, dataset gabungan
-Roboflow + Kaggle COCO + background dengan anti-leakage) adalah baseline
-historis — run aktif kini **v6** (`smartgate-colab-v6-*`, lihat tabel di atas).
-Ringkasan lengkap ada di `runs/detect/smartgate-colab-v5/evaluation_summary.json`:
-
-| Metrik | Nilai |
-| --- | ---: |
-| Validation mAP50 | 0,8938 |
-| Validation mAP50-95 | 0,5339 |
-| Test mAP50 | 0,9491 |
-| Test mAP50-95 | 0,5999 |
-| Valid format rate OCR (V4 parser) | 73,95% (88/119 plat) |
-| Latency rata-rata / P95 | 98,22 ms / 176,99 ms |
-
-Run lama yang masih tersimpan (baseline historis, jangan dipakai untuk klaim):
-
-- `smartgate` (15 epoch, `imgsz=416`, CPU): precision 0,714; recall 0,668; mAP50 0,716; mAP50-95 0,435.
-- `smartgate-full` (4 epoch, belum final): mAP50 sementara 0,6671.
-
-Artefak training:
+Artefak training terbaru (v6 Multi-Domain Fold 0):
 
 ```text
-runs/detect/smartgate-colab-v5/      # run lama (V5, baseline)
+runs/detect/smartgate-colab-v6-yolo11n/   # YOLOv11n v6 (sumber: smartgate-artifacts-Y11N/)
 ├── results.csv
 ├── evaluation_summary.json
 ├── confusion_matrix.png
 └── weights/best.pt, best.onnx
-runs/detect/runs/detect/smartgate/   # baseline lama
-runs/detect/runs/detect/smartgate-full/
+runs/detect/smartgate-colab-v6-yolov8n/   # YOLOv8n v6 (sumber: smartgate-artifacts-Y8N/)
+├── results.csv
+├── evaluation_summary.json
+├── confusion_matrix.png
+└── weights/best.pt, best.onnx
 ```
 
-Halaman [`/training`](http://localhost:5001/training) menampilkan status epoch,
+Halaman [`/training`](http://localhost:5000/training) menampilkan status epoch,
 loss, precision, recall, mAP, plot yang tersedia, serta metrik evaluasi terbaru
-dari `evaluation_summary.json`. Halaman otomatis memilih run dengan
-`results.csv` paling baru.
+dari `evaluation_summary.json`. Halaman otomatis memilih run v6 terbaru.
 
 ## 4. Evaluasi
 
-Validasi detektor:
+Validasi detektor & OCR pada dataset `plat-nomor`:
 
 ```powershell
-yolo val model=runs/detect/smartgate-colab-v5/weights/best.pt `
-  data=dataset_merged/data.yaml
+yolo val model=runs/detect/smartgate-colab-v6-yolo11n/weights/best.pt `
+  data=plat-nomor/data.yaml
+python tools/eval_dataset.py --dataset plat-nomor --split test
 ```
 
-Evaluasi pipeline OCR:
+Evaluasi tambahan pada dataset `Datasheet 2`:
 
 ```powershell
 python tools/eval_real.py --part both --limit 200
@@ -285,12 +269,11 @@ python run.py
 ```
 
 Jika `SGS_YOLO_WEIGHTS` tidak diisi, prototype memakai bobot varian aktif dari
-`runs/detect/smartgate-colab-v6-<varian>/weights/best.pt` (varian dipilih di
-**/training**, default `yolov8n`, rekomendasi `yolo11n`); run lama
-(`smartgate-colab-v5`, `smartgate`, `smartgate-full`) hanya dipakai sebagai
-fallback bila bobot v6 belum ada. Hasil YOLO tetap melewati
-gerbang confidence, rasio plat, tekstur, dan jumlah glyph; kotak yang hanya
-menyerupai gril/emblem tidak diteruskan ke OCR.
+`runs/detect/smartgate-colab-v6-<varian>/weights/best.pt` atau langsung dari
+folder `smartgate-artifacts-Y11N/best.pt` dan `smartgate-artifacts-Y8N/best.pt`
+di root repositori (varian dipilih di **/training**, `yolo11n` atau `yolov8n`).
+Hasil YOLO tetap melewati gerbang confidence, rasio plat, tekstur, dan jumlah
+glyph; kotak yang hanya menyerupai gril/emblem tidak diteruskan ke OCR.
 
 Jalur YOLO hanya menerima `class_id=0` karena dataset saat ini hanya memiliki
 kelas `number-plate`. Kandidat juga wajib memiliki rasio lebar/tinggi 1,4--5,0
@@ -374,7 +357,40 @@ Untuk deployment:
 - [ ] Gagal OCR menghasilkan alert satpam, bukan auto-open.
 - [ ] Snapshot dan keputusan tersimpan di audit log.
 
-## 9. Referensi
+## 9. Referensi (Terdaftar di Mendeley / Crossref / Scopus — 5 Tahun Terakhir: 2021–2026)
 
-- Harani, N. H., Prianto, C., dan Hasanah, M. (2019). *Deteksi Objek dan Pengenalan Karakter Plat Nomor Kendaraan Indonesia Menggunakan Metode CNN Berbasis Python*. Jurnal Teknik Informatika Vol. 11 No. 3. [PDF](../../docs/artc/658-Article%20Text-963-1-10-20200213.pdf)
-- Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor Kendaraan Menggunakan Algoritma CNN Berbasis Tensorflow*. Remik Vol. 9 No. 3. DOI [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169). [PDF](../../docs/artc/15169-Article%20Text-24310-1-10-20250811.pdf)
+- Ramadhani, A. D., dkk. (2026). *Analisis Akurasi Pembacaan Karakter Plat Nomor Kendaraan Indonesia Menggunakan YOLOv8 dan EasyOCR*. Jurnal Teknika, Vol. 18, No. 2, 147–154. DOI: [10.30736/jt.v18i2.1604](https://doi.org/10.30736/jt.v18i2.1604).
+- Sutikno, Sugiharto, A., dan Kusumaningrum, R. (2025). *Enhanced Automatic License Plate Detection and Recognition using CLAHE and YOLOv11 for Seat Belt Compliance Detection*. Engineering, Technology & Applied Science Research (ETASR), Vol. 15, No. 1, 20271–20278. DOI: [10.48084/etasr.9629](https://doi.org/10.48084/etasr.9629).
+- Syihabuddin, E. R., Angela, W., Naufal, M., dan Pramunendar, R. A. (2025). *Pengenalan Plat Nomor Kendaraan dengan YOLOv8 dan PaddleOCR*. Journal of Computer Science and Technology (JCS-TECH), Vol. 5, No. 2, 66–72. DOI: [10.54840/jcstech.v5i2.374](https://doi.org/10.54840/jcstech.v5i2.374).
+- Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor Kendaraan Menggunakan Algoritma CNN Berbasis Tensorflow*. Remik Vol. 9 No. 3. DOI [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169). [PDF](artc/15169-Article%20Text-24310-1-10-20250811.pdf)
+- Salsabila, N., dan Sriani. (2024). *Enhancing Automated Vehicle License Plate Recognition with YOLOv8 and EasyOCR*. Journal of Information Systems and Informatics (Journal ISI), Vol. 6, No. 3, 1577–1597. DOI: [10.51519/journalisi.v6i3.848](https://doi.org/10.51519/journalisi.v6i3.848).
+- Haidar, M. A., dan Arifin, F. (2024). *Evaluation of YOLOv8 Algorithm for Vehicle License Plate Detection System in UNY Integrated Parking Lot*. ELINVO, Vol. 9, No. 2, 220–229. DOI: [10.21831/elinvo.v9i2.70032](https://doi.org/10.21831/elinvo.v9i2.70032).
+- Chandrawan, M. A., dkk. (2024). *Design and Build an Automatic AI-IoT Parking Barrier Management System Using YOLO & OCR*. JTRISTE, Vol. 10, No. 1, 41–49. DOI: [10.55645/jtriste.v10i1.389](https://doi.org/10.55645/jtriste.v10i1.389).
+- Iriawan, A. D., dan Sunyoto, A. (2023). *Automatic License Plate Recognition System in Indonesia Using YOLOv8 and EasyOCR Algorithm*. 2023 6th International Conference on Information and Communications Technology (ICOIACT), IEEE, 384–388. DOI: [10.1109/ICOIACT59844.2023.10455908](https://doi.org/10.1109/ICOIACT59844.2023.10455908).
+- Peraturan Kepolisian Negara Republik Indonesia Nomor 7 Tahun 2021 tentang Registrasi dan Identifikasi Kendaraan Bermotor.
+
+---
+
+## 10. Lampiran: Atribusi Lisensi Sumber Data Unduhan
+
+### A. Gambar Wikimedia Commons
+- `File:License plate from Indonesia.jpg` — CC BY-SA 3.0 — brew (Indonesian Wikipedia) — https://commons.wikimedia.org/wiki/File:License_plate_from_Indonesia.jpg
+- `File:A Vehicle registration plate from Yogyakarta Special District.png` — CC BY-SA 3.0 — Crisco 1492 — https://commons.wikimedia.org/wiki/File:A_Vehicle_registration_plate_from_Yogyakarta_Special_District.png
+- `File:INDONESIA 1979 license plate - Flickr - woody1778a.jpg` — CC BY-SA 2.0 — Jerry "Woody" — https://commons.wikimedia.org/wiki/File:INDONESIA_1979_license_plate_-_Flickr_-_woody1778a.jpg
+- `File:Indonesian registration plate for Jakarta, Depok, Tangerang and Bekasi.jpg` — GFDL — Iwansw — https://commons.wikimedia.org/wiki/File:Indonesian_registration_plate_for_Jakarta,_Depok,_Tangerang_and_Bekasi.jpg
+- `File:Plat D.jpg` — CC BY-SA 4.0 — Nd8792 — https://commons.wikimedia.org/wiki/File:Plat_D.jpg
+- `File:Indonesian personalized number plate with FE-Schrift.jpg` — CC BY-SA 4.0 — AdityaPrasetyo — https://commons.wikimedia.org/wiki/File:Indonesian_personalized_number_plate_with_FE-Schrift.jpg
+- `File:2019 indonesian plate.png` — CC0 — Thegunkid — https://commons.wikimedia.org/wiki/File:2019_indonesian_plate.png
+- `File:Indonesian diplomatic registration plate.png` — CC0 — IseDaByThatEditsTheBoat — https://commons.wikimedia.org/wiki/File:Indonesian_diplomatic_registration_plate.png
+- `File:2008 indonesian plate yellow.png` — CC BY-SA 4.0 — Althaf aristo — https://commons.wikimedia.org/wiki/File:2008_indonesian_plate_yellow.png
+- `File:Plat Nomor Kab.Sidoarjo.jpg` — CC BY-SA 4.0 — Erikodiony — https://commons.wikimedia.org/wiki/File:Plat_Nomor_Kab.Sidoarjo.jpg
+- `File:East Timor vehicle license plate under Indonesian Occupation.png` — CC0 — Bennyesp23 — https://commons.wikimedia.org/wiki/File:East_Timor_vehicle_license_plate_under_Indonesian_Occupation.png
+- `File:Contoh Plat nomor Karesidenan Surakarta.jpg` — CC BY-SA 4.0 — Hendy Sannidhya — https://commons.wikimedia.org/wiki/File:Contoh_Plat_nomor_Karesidenan_Surakarta.jpg
+- `File:Plat Nomor BG.jpg` — CC BY-SA 4.0 — Hendy Sannidhya — https://commons.wikimedia.org/wiki/File:Plat_Nomor_BG.jpg
+- `File:Nieuwe Kadijk Breda DSCF5276.jpg` — CC BY 4.0 — G.Lanting — https://commons.wikimedia.org/wiki/File:Nieuwe_Kadijk_Breda_DSCF5276.jpg
+
+### B. Sumber Dataset Publik Tambahan
+- **ALPR Indonesia Character Crops**: `img88/ALPR_IndonesiaPlateNumber_ComputerVision` (360 crop karakter A–Z/0–9, lisensi MIT) — https://github.com/img88/ALPR_IndonesiaPlateNumber_ComputerVision
+- **IndoTraffic Dataset**: `ekasuartawan82/indotraffic-dataset` (CC BY 4.0, kandidat *hard-negative background* setelah inspeksi manual) — https://github.com/ekasuartawan82/indotraffic-dataset
+- **Indonesia License Plate Detection (Roboflow Universe, CC BY 4.0)** — https://universe.roboflow.com/deteksi-topi/indonesia-license-plate-detection-fjfht-p6vj2
+- **Indonesian Plate Number from Multi-Sources (Kaggle)** — https://www.kaggle.com/datasets/linkgish/indonesian-plate-number-from-multi-sources
