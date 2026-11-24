@@ -55,16 +55,31 @@ ASPECT_RANGES = {
 
 
 VARIANT_ENV = "SGS_YOLO_VARIANT"
+ONNX_ENV = "SGS_USE_ONNX"
 VARIANTS: dict[str, str] = {
     "yolo11n": "runs/detect/smartgate-colab-v6-yolo11n/weights/best.pt",
     "yolov8n": "runs/detect/smartgate-colab-v6-yolov8n/weights/best.pt",
+}
+ONNX_VARIANTS: dict[str, str] = {
+    "yolo11n": "runs/detect/smartgate-colab-v6-yolo11n/weights/best.onnx",
+    "yolov8n": "runs/detect/smartgate-colab-v6-yolov8n/weights/best.onnx",
 }
 ARTIFACT_FALLBACKS: dict[str, Path] = {
     "yolo11n": config.REPO_ROOT / "smartgate-artifacts-Y11N" / "best.pt",
     "yolov8n": config.REPO_ROOT / "smartgate-artifacts-Y8N" / "best.pt",
 }
+ARTIFACT_ONNX_FALLBACKS: dict[str, Path] = {
+    "yolo11n": config.REPO_ROOT / "smartgate-artifacts-Y11N" / "best.onnx",
+    "yolov8n": config.REPO_ROOT / "smartgate-artifacts-Y8N" / "best.onnx",
+}
 _raw_variant = os.getenv(VARIANT_ENV, "yolov8n").strip()
 _variant: str = _raw_variant if _raw_variant in VARIANTS else "yolov8n"
+
+
+def _use_onnx() -> bool:
+    """Aktif bila SGS_USE_ONNX!=0 dan paket ``onnxruntime`` tersedia."""
+    enabled = os.getenv(ONNX_ENV, "1").strip().lower() not in {"0", "false", "no"}
+    return enabled and config.onnxruntime_available()
 
 
 def current_variant() -> str:
@@ -80,19 +95,30 @@ def set_variant(name: str) -> None:
     _model.cache_clear()
 
 
+def _variant_candidates(name: str, prefer_onnx: bool) -> list[Path]:
+    """Urutan kandidat bobot untuk satu varian (ONNX dulu bila diaktifkan)."""
+    base = Path(__file__).resolve().parent.parent
+    onnx_paths = [base / ONNX_VARIANTS[name], ARTIFACT_ONNX_FALLBACKS[name]]
+    pt_paths = [base / VARIANTS[name], ARTIFACT_FALLBACKS[name]]
+    return (onnx_paths + pt_paths) if prefer_onnx else pt_paths
+
+
 def available_variants() -> dict[str, dict[str, Any]]:
     """Daftar varian + status bobot + metrik evaluasi, untuk halaman /training."""
     import json
 
     base = Path(__file__).resolve().parent.parent
+    prefer_onnx = _use_onnx()
     out: dict[str, dict[str, Any]] = {}
     for name, relative in VARIANTS.items():
         candidate = base / relative
         artifact_candidate = ARTIFACT_FALLBACKS[name]
-        active_file = candidate if candidate.is_file() else (artifact_candidate if artifact_candidate.is_file() else candidate)
+        candidates = _variant_candidates(name, prefer_onnx=prefer_onnx)
+        active_file = next((p for p in candidates if p.is_file()), candidate)
         ready = active_file.is_file()
         info: dict[str, Any] = {
             "weights": str(active_file),
+            "runtime": "onnxruntime" if active_file.suffix.lower() == ".onnx" else "pytorch",
             "ready": ready,
             "size_mb": round(active_file.stat().st_size / 1e6, 1) if ready else 0,
         }
@@ -116,17 +142,13 @@ def available_variants() -> dict[str, dict[str, Any]]:
     return out
 
 
-def _default_weights() -> Path | None:
-    """Pilih bobot training v6: varian aktif di runs/detect atau langsung dari smartgate-artifacts-*."""
-    base = Path(__file__).resolve().parent.parent
-    candidates: list[Path] = [
-        base / VARIANTS[_variant],
-        ARTIFACT_FALLBACKS[_variant],
-    ]
+def _default_weights(*, prefer_onnx: bool | None = None) -> Path | None:
+    """Pilih bobot training v6: prioritaskan .onnx bila onnxruntime aktif, fallback .pt."""
+    use_onnx = _use_onnx() if prefer_onnx is None else prefer_onnx
+    candidates: list[Path] = _variant_candidates(_variant, prefer_onnx=use_onnx)
     for name in VARIANTS:
         if name != _variant:
-            candidates.append(base / VARIANTS[name])
-            candidates.append(ARTIFACT_FALLBACKS[name])
+            candidates.extend(_variant_candidates(name, prefer_onnx=use_onnx))
     for candidate in candidates:
         if candidate.is_file():
             return candidate
@@ -156,15 +178,26 @@ def _model() -> Any | None:
         torch.set_num_threads(config.CPU_THREADS)
     except ImportError:
         return None
-    yolo = YOLO(str(path))
-    try:
-        # Panggilan predict pertama melakukan Conv+BN fusion (~1,5-2 dtk di CPU);
-        # lakukan saat warmup agar scan pertama pengguna langsung cepat.
+
+    def _load_and_warmup(weight_file: Path) -> Any:
+        yolo = YOLO(str(weight_file), task="detect")
+        # Panggilan predict pertama melakukan Conv+BN fusion / inisialisasi session
+        # ONNX (~1,5-2 dtk di CPU); lakukan saat warmup agar scan pertama cepat.
         dummy = np.zeros((160, 160, 3), dtype=np.uint8)
         yolo.predict(dummy, conf=DEFAULT_CONF, imgsz=160, verbose=False)
+        return yolo
+
+    try:
+        return _load_and_warmup(path)
     except Exception:  # noqa: BLE001
-        pass
-    return yolo
+        if path.suffix.lower() == ".onnx":
+            fallback_pt = _default_weights(prefer_onnx=False)
+            if fallback_pt is not None and fallback_pt != path:
+                try:
+                    return _load_and_warmup(fallback_pt)
+                except Exception:  # noqa: BLE001
+                    return None
+        return None
 
 
 def available() -> bool:
@@ -178,7 +211,8 @@ def status() -> dict[str, Any]:
         return {"backend": "opencv", "yolo": False, "reason": f"{ENV_VAR} belum diisi"}
     if _model() is None:
         return {"backend": "opencv", "yolo": False, "reason": "ultralytics belum terpasang"}
-    return {"backend": "yolo", "yolo": True, "weights": str(path)}
+    runtime = "onnxruntime" if path.suffix.lower() == ".onnx" else "pytorch"
+    return {"backend": "yolo", "yolo": True, "runtime": runtime, "weights": str(path)}
 
 
 def _padded_quad(quad: Any, image_shape: Any) -> Any:

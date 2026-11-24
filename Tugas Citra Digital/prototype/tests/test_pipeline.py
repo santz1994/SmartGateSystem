@@ -33,7 +33,7 @@ def test_normalize_plate() -> None:
         "8 1234 XYZ": "B1234XYZ",  # 8 di blok huruf depan = B
         "BI234XYZ": "B1234XYZ",  # I di blok angka = 1
         "D 5678 ABC": "D5678ABC",
-        "B 9O12 QWE": "B9012OWE",  # O di blok angka = 0; Q bukan huruf NRKB -> O
+        "B 9O12 QWE": "B9012QWE",  # O di blok angka = 0; Q adalah huruf seri sah NRKB (L-1)
         "B1G34XYZ": "B1634XYZ",  # G di blok angka = 6
         "B1234X6": "B1234XG",  # 6 di blok huruf belakang = G
         "81257PR": "B1257PR",  # 8 di prefix dan 5 di angka
@@ -65,7 +65,8 @@ def test_number_fits_class() -> None:
     check("B 2287 TXO bukan motor Polda Metro Jaya (3000-6999)", not ocr.number_fits_class("B2287TXO", "motorcycle"))
     check("D 2287 TXO = motor wilayah umum (2000-6999)", ocr.number_fits_class("D2287TXO", "motorcycle"))
     check("B 7500 XY = bus (7000-7999)", ocr.number_fits_class("B7500XY", "bus"))
-    check("B 8223 XY = barang/truk", ocr.number_fits_class("B8223XY", "truck"))
+    check("B 7500 XY bukan barang/truk (L-2)", not ocr.number_fits_class("B7500XY", "truck"))
+    check("B 8223 XY = barang/truk (8000-8999)", ocr.number_fits_class("B8223XY", "truck"))
     check("B 9001 AA = khusus", ocr.number_fits_class("B9001AA", "custom"))
     check("tanpa kelas = False", not ocr.number_fits_class("L1257PR", None))
 
@@ -299,8 +300,8 @@ def test_plate_text_quality_gate() -> None:
         ocr.best_plate_text(["H2518OK", "1226"]) == "H2518OK",
     )
     check(
-        "Q di blok huruf = O (H 2518 QK -> H2518OK)",
-        ocr.best_plate_text(["H", "2518", "QK", "12 26"]) == "H2518OK",
+        "Q di blok huruf dipertahankan (H 2518 QK -> H2518QK, L-1)",
+        ocr.best_plate_text(["H", "2518", "QK", "12 26"]) == "H2518QK",
         f"(dapat {ocr.best_plate_text(['H', '2518', 'QK', '12 26'])!r})",
     )
     check(
@@ -480,11 +481,19 @@ def test_model_variant() -> None:
 
     detect_yolo.set_variant("yolov8n")
     path_n = detect_yolo.weights_path()
-    check("varian yolov8n -> bobot v6-n", path_n is not None and "yolov8n" in str(path_n), f"(dapat {path_n})")
+    check(
+        "varian yolov8n -> bobot v6-n",
+        path_n is not None and ("yolov8n" in str(path_n) or "Y8N" in str(path_n)),
+        f"(dapat {path_n})",
+    )
     detect_yolo.set_variant("yolo11n")
     path_x = detect_yolo.weights_path()
     if detect_yolo.available_variants()["yolo11n"]["ready"]:
-        check("varian yolo11n -> bobot yolo11n", path_x is not None and "yolo11n" in str(path_x), f"(dapat {path_x})")
+        check(
+            "varian yolo11n -> bobot yolo11n",
+            path_x is not None and ("yolo11n" in str(path_x) or "Y11N" in str(path_x)),
+            f"(dapat {path_x})",
+        )
     else:
         check("varian yolo11n tanpa bobot -> fallback ke v6-n", path_x == path_n, f"(dapat {path_x})")
     detect_yolo.set_variant("yolov8n")
@@ -645,6 +654,49 @@ def test_security_and_cleanup_polish() -> None:
     check("mencapai 5 gagal login dalam 60 detik diblokir HTTP 429 (SEC-1)", web._login_rate_limited(test_ip))
     web._clear_login_failures(test_ip)
     check("reset catatan gagal login membuka blokir setelah sukses (SEC-1)", not web._login_rate_limited(test_ip))
+
+    # M-1: deglare tidak meng-inpaint TNKB dasar putih (median >= 175), namun meredam glare terlokalisasi pada plat gelap
+    np = pipeline._np()
+    white_plate = np.full((60, 200, 3), 252, dtype=np.uint8)
+    white_plate[15:45, 20:40] = 20
+    check("deglare tidak menyentuh plat dasar putih (M-1)", pipeline.deglare(white_plate) is white_plate)
+    dark_glare = np.full((60, 200, 3), 60, dtype=np.uint8)
+    dark_glare[20:32, 90:106] = 255
+    check("deglare memproses plat gelap dengan glare terlokalisasi (M-1)", pipeline.deglare(dark_glare) is not dark_glare)
+
+    # L-3: error sqlite3 pada db.settings() tetap fail-safe (fallback config.DEFAULTS, tidak pernah AUTO_OPEN)
+    import sqlite3
+    from app import db as _db, service as _service
+
+    orig_settings = _db.settings
+    try:
+        def _boom() -> dict[str, float]:
+            raise sqlite3.OperationalError("simulated DB lock")
+        _db.settings = _boom
+        frame = np.full((120, 320, 3), 40, dtype=np.uint8)
+        res = _service.evaluate([("cam1", frame, "gate")], persist=False, fast=True)
+        check("db.settings() error tetap fail-safe tanpa exception (L-3)", res.decision != fusion.AUTO_OPEN)
+    finally:
+        _db.settings = orig_settings
+
+    # L-4: opsi SGS_USE_ONNX=0 memaksa fallback mulus ke .pt
+    import os
+    from app import detect_yolo
+
+    prev_onnx = os.environ.get("SGS_USE_ONNX")
+    try:
+        os.environ["SGS_USE_ONNX"] = "0"
+        pt_path = detect_yolo.weights_path()
+        check(
+            "SGS_USE_ONNX=0 memilih bobot .pt (L-4)",
+            pt_path is None or pt_path.suffix.lower() == ".pt",
+            f"(dapat {pt_path})",
+        )
+    finally:
+        if prev_onnx is None:
+            os.environ.pop("SGS_USE_ONNX", None)
+        else:
+            os.environ["SGS_USE_ONNX"] = prev_onnx
 
 
 def test_real_plat_nomor_dataset() -> None:

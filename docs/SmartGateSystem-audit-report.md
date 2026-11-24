@@ -522,3 +522,16 @@ Untuk mencegah degradasi di paruh akhir epoch (seperti yang terjadi pada Epoch 3
    - Menyelaraskan `train_yolo.py` (`--fold` + `ANTI_DEGRADATION_HYPS`) serta notebook Google Colab (`a_YOLOv11n.ipynb` & `a_YOLOv8n.ipynb`) dengan parameter generalisasi penuh (`cos_lr=True`, `degrees=7.0`, `shear=2.5`, `perspective=0.0004`, `scale=0.45`, `hsv_s=0.65`, `hsv_v=0.45`, `erasing=0.25`, `weight_decay=0.001`, `dropout=0.10`, `close_mosaic=15`, `fliplr=0.0`).
    - Memperbarui sel evaluasi benchmark di notebook Colab agar menggunakan aturan Perpol No. 7 Tahun 2021 (bebas bug `L -> D`, mendukung kode wilayah baru `PG/PS/PT/PY`, dan menyaring 4 digit masa berlaku `MMYY`).
 
+### ✅ Tahap 4 (SELESAI — 24 November 2026) — Penutupan 4 Temuan Minor Audit Akhir (`M-1`, `L-1`, `L-2`, `L-3`, `L-4`)
+1. **[SELESAI ✅] Pencegahan Artefak `deglare()` pada TNKB Dasar Putih (`M-1`, `app/pipeline.py:184-211`)**:
+   - Ambang deteksi *specular glare* dinaikkan menjadi `gray >= 251`, dan `cv2.inpaint(..., INPAINT_TELEA)` kini hanya dijalankan apabila `median(gray) < 175` **dan** proporsi piksel jenuh `0 < glare_ratio <= 0.25`. Papan plat dasar putih (Perpol No. 7 Tahun 2021) tidak lagi ter-inpaint dan tepi karakter tetap tajam.
+2. **[SELESAI ✅] Pelestarian Huruf Seri `Q` & Pemisahan Rentang `bus` vs `truck` (`L-1`, `L-2`, `app/ocr.py:45-77`)**:
+   - Menghapus pemetaan global `"Q": "O"` dari `_TO_ALPHA` sehingga huruf seri sah NRKB seperti `B 9012 QWE` dan `H 2518 QK` dipertahankan utuh.
+   - Memisahkan rentang alokasi nomor urut pada `NUMBER_GROUPS_GENERAL` (`NUMBER_GROUPS`) dan `NUMBER_GROUPS_METRO`: `(7000, 7999, "bus")` khusus Mobil Bus dan `(8000, 8999, "truck")` khusus Mobil Barang sesuai Perpol No. 7 Tahun 2021.
+3. **[SELESAI ✅] Fail-Safe `db.settings()` di `evaluate()` (`L-3`, `app/service.py:409-461`)**:
+   - Membungkus `thresholds = db.settings()` di dalam `try ... except sqlite3.Error:` dengan fallback aman ke `dict(config.DEFAULTS)` dan `db_available = False` agar gangguan SQLite saat cache kosong tidak pernah melempar *unhandled exception* maupun memicu `AUTO_OPEN`.
+4. **[SELESAI ✅] Dukungan Pemuatan Otomatis `best.onnx` via ONNX Runtime (`L-4`, `app/config.py`, `app/detect_yolo.py`)**:
+   - Menambahkan dukungan prioritas `.onnx` (`runs/detect/smartgate-colab-v6-*/weights/best.onnx` dan `smartgate-artifacts-*/best.onnx`) yang otomatis aktif saat `onnxruntime` terpasang (`SGS_USE_ONNX=1` default) dengan fallback mulus ke `.pt`.
+5. **Verifikasi Otomatis Akhir**: Seluruh **`151 pemeriksaan`** di `tests/test_pipeline.py` (termasuk pengujian nyata `plat-nomor/test` serta regresi `M-1`, `L-1`, `L-2`, `L-3`, `L-4`) lulus 100%.
+
+

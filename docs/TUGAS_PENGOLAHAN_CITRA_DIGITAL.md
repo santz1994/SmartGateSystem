@@ -300,9 +300,13 @@ Uji manual yang sudah dicakup meliputi normalisasi NRKB (Perpol No. 7 Tahun
 penggabungan plat 2 baris, pembacaan plat hitam bertulisan putih, efisiensi
 CPU/RAM, pembagian 5-Fold Stratified Group Cross-Validation (`dHash` 64-bit),
 keamanan sesi/rate-limiting, fusi, dan alur end-to-end. Regresi otomatis
-terkunci di `tests/test_pipeline.py` (assert tanpa framework, **133
-pemeriksaan**): aturan NRKB Perpol 7/2021, voting, moiré monitor
-(`test_monitor_moire`), dan distraktor layar/video (`test_distractors`).
+terkunci di `tests/test_pipeline.py` (assert tanpa framework, **151
+pemeriksaan**): aturan NRKB Perpol 7/2021 (termasuk pelestarian huruf seri `Q`
+dan pemisahan golongan `bus` 7000–7999 vs `truck` 8000–8999), perlindungan
+`deglare()` untuk TNKB dasar putih (`M-1`), *fail-safe* `db.settings()` (`L-3`),
+dukungan pemuatan otomatis `best.onnx` (`L-4`), voting, moiré monitor
+(`test_monitor_moire`), distraktor layar/video (`test_distractors`), serta uji
+deteksi & OCR otomatis pada dataset nyata `plat-nomor/test`.
 Kasus seperti `L1257PR` berhasil dibantu penyempitan pita teks dan voting.
 Kasus pantulan layar seperti `AA5045YN` masih tidak stabil karena detektor
 klasik dapat memecah plat menjadi fragmen.
@@ -338,8 +342,9 @@ regularisasi anti-degradasi pada eksperimen v6 Multi-Domain Fold 0 berhasil
 meningkatkan akurasi deteksi hold-out hingga **`Test mAP50 = 0,9693`** pada
 **YOLOv11n** (`5,48 MB`) serta meningkatkan **`End-to-End OCR Valid Format Rate`
 hingga `75,96%`** dengan latensi rata-rata **`76,50 ms`** pada **YOLOv8n**
-(`6,48 MB`), didukung oleh **133 pemeriksaan** unit test otomatis yang lulus
-100%. Validasi produksi tetap memerlukan rekaman CCTV nyata yang mencakup
+(`6,48 MB`), didukung oleh **151 pemeriksaan** unit test otomatis yang lulus
+100% (termasuk penutupan seluruh temuan audit minor `M-1`, `L-1`, `L-2`, `L-3`,
+dan `L-4` serta dukungan pemuatan otomatis `best.onnx`). Validasi produksi tetap memerlukan rekaman CCTV nyata yang mencakup
 siang, malam, hujan, pantulan, dan kendaraan tidak terdaftar.
 
 ## Referensi (Terdaftar di Mendeley / Crossref / Scopus — 5 Tahun Terakhir: 2021–2026)

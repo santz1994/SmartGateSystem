@@ -67,9 +67,19 @@ MAX_UPLOAD_MB = 16
 
 REPO_ROOT = BASE_DIR.parent.parent
 
+# Prioritaskan artefak best.onnx (ONNX Runtime) bila paket onnxruntime terpasang
+# agar inferensi CPU lebih hemat RAM & cepat. Set SGS_USE_ONNX=0 untuk paksa .pt.
+USE_ONNX = os.getenv("SGS_USE_ONNX", "1").strip().lower() not in {"0", "false", "no"}
+
 # Urutan pencarian default bobot detektor YOLO (memprioritaskan v6 Multi-Domain Fold 0:
 # runs/detect/smartgate-colab-v6-* lalu langsung ke folder artefak hasil training
 # smartgate-artifacts-Y11N dan smartgate-artifacts-Y8N di root repositori).
+YOLO_ONNX_CANDIDATES: tuple[Path, ...] = (
+    BASE_DIR / "runs" / "detect" / "smartgate-colab-v6-yolo11n" / "weights" / "best.onnx",
+    BASE_DIR / "runs" / "detect" / "smartgate-colab-v6-yolov8n" / "weights" / "best.onnx",
+    REPO_ROOT / "smartgate-artifacts-Y11N" / "best.onnx",
+    REPO_ROOT / "smartgate-artifacts-Y8N" / "best.onnx",
+)
 YOLO_MODEL_CANDIDATES: tuple[Path, ...] = (
     BASE_DIR / "runs" / "detect" / "smartgate-colab-v6-yolo11n" / "weights" / "best.pt",
     BASE_DIR / "runs" / "detect" / "smartgate-colab-v6-yolov8n" / "weights" / "best.pt",
@@ -78,11 +88,23 @@ YOLO_MODEL_CANDIDATES: tuple[Path, ...] = (
 )
 
 
+def onnxruntime_available() -> bool:
+    """True bila paket ``onnxruntime`` terpasang dan siap menjalankan model ``.onnx``."""
+    import importlib.util
+
+    return importlib.util.find_spec("onnxruntime") is not None
+
+
 def resolve_yolo_model_path() -> Path:
     """Kembalikan path bobot YOLO default dari env atau kandidat pertama yang tersedia."""
     env_path = os.getenv("SGS_YOLO_WEIGHTS", "").strip()
     if env_path:
         return Path(env_path)
+    use_onnx = os.getenv("SGS_USE_ONNX", "1").strip().lower() not in {"0", "false", "no"}
+    if use_onnx and onnxruntime_available():
+        for candidate in YOLO_ONNX_CANDIDATES:
+            if candidate.is_file():
+                return candidate
     for candidate in YOLO_MODEL_CANDIDATES:
         if candidate.is_file():
             return candidate

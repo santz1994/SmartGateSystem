@@ -185,14 +185,20 @@ def deglare(crop: Any, clahe_clip_limit: float | None = None) -> Any:
     """Redam pantulan cahaya (piksel highlight jenuh) lalu rapikan kontras.
 
     Pantulan lampu/silau membuat sebagian karakter hilang di area putih jenuh.
-    Area tersebut di-inpaint dari tepi sekitarnya, lalu CLAHE meratakan cahaya.
+    Inpainting hanya dijalankan pada plat dengan median kecerahan < 175 dan
+    proporsi piksel jenuh (gray >= 251) dalam (0, 0.25] agar latar papan TNKB
+    putih bersih (Perpol No. 7 Tahun 2021) tidak ter-inpaint dan mengaburkan
+    tepi huruf.
     """
     cv2, np = _cv2(), _np()
     if getattr(crop, "size", 0) == 0:
         return crop
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    mask = ((gray >= 245) * 255).astype(np.uint8)
-    if not mask.any():
+    if float(np.median(gray)) >= 175.0:
+        return crop
+    mask = ((gray >= 251) * 255).astype(np.uint8)
+    glare_ratio = float((mask > 0).mean())
+    if glare_ratio <= 0.0 or glare_ratio > 0.25:
         return crop
     fixed = cv2.inpaint(crop, mask, 3, cv2.INPAINT_TELEA)
     lab = cv2.cvtColor(fixed, cv2.COLOR_BGR2LAB)

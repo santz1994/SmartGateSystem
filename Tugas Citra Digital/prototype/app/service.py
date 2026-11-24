@@ -406,7 +406,12 @@ def evaluate(
     ``images`` berisi tuple ``(label, np.ndarray BGR, cctv_role)``.
     """
     session_id = session_id or uuid.uuid4().hex[:12]
-    thresholds = db.settings()
+    db_available = True
+    try:
+        thresholds = db.settings()
+    except sqlite3.Error:
+        db_available = False
+        thresholds = dict(config.DEFAULTS)
 
     with _INFERENCE_SLOTS:
         frames = [
@@ -442,17 +447,17 @@ def evaluate(
 
     # --- Pencocokan database (fail-safe: error DB => tidak auto-open) ---
     match = booking = None
-    db_available = True
-    try:
-        match = db.find_vehicle(plate_text, sticker_code)
-        if match is not None and not fusion.evidence_matches_vehicle(match, plate_text, sticker_code):
-            match = None
-            booking = None
-        if match is not None and match["requires_booking"] and plate_text:
-            booking = db.active_booking(plate_text)
-    except sqlite3.Error:
-        db_available = False
-        match = booking = None
+    if db_available:
+        try:
+            match = db.find_vehicle(plate_text, sticker_code)
+            if match is not None and not fusion.evidence_matches_vehicle(match, plate_text, sticker_code):
+                match = None
+                booking = None
+            if match is not None and match["requires_booking"] and plate_text:
+                booking = db.active_booking(plate_text)
+        except sqlite3.Error:
+            db_available = False
+            match = booking = None
 
     decision, reason = fusion.decide(
         plate_text=plate_text,

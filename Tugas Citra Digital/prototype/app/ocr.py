@@ -44,7 +44,7 @@ _TO_DIGIT = str.maketrans({
 })
 _TO_ALPHA = str.maketrans({
     "0": "O", "1": "I", "2": "Z", "4": "A", "5": "S", "6": "G",
-    "7": "T", "8": "B", "Q": "O",
+    "7": "T", "8": "B",
 })
 _AMBIGUOUS_ALPHA = frozenset("OQIZSBGTALD")
 _AMBIGUOUS_DIGIT = frozenset("01245678")
@@ -61,18 +61,19 @@ VALID_PREFIXES = frozenset({
     "DR","DT","DW","EA","EB","ED","KB","KH","KT","KU","PA","PB","PG","PS",
     "PT","PY",
 })
-NUMBER_GROUPS = (
+NUMBER_GROUPS_GENERAL = (
     (1, 1999, "car"),
     (2000, 6999, "motorcycle"),
     (7000, 7999, "bus"),
-    (7000, 8999, "truck"),
+    (8000, 8999, "truck"),
     (9000, 9999, "custom"),
 )
+NUMBER_GROUPS = NUMBER_GROUPS_GENERAL
 NUMBER_GROUPS_METRO = (
     (1, 2999, "car"),
     (3000, 6999, "motorcycle"),
     (7000, 7999, "bus"),
-    (7000, 8999, "truck"),
+    (8000, 8999, "truck"),
     (9000, 9999, "custom"),
 )
 
