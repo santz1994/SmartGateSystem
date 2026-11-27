@@ -74,8 +74,8 @@
 
     <label>Arah Gerbang</label>
     <div class="dir-switch" role="group" aria-label="Arah Log">
-      <button type="button" class="dir-btn {% if log.direction == 'IN' %}active{% endif %}" data-dir-target="log-direction" data-dir="IN">Masuk (IN)</button>
-      <button type="button" class="dir-btn {% if log.direction == 'OUT' %}active{% endif %}" data-dir-target="log-direction" data-dir="OUT">Keluar (OUT)</button>
+      <button type="button" class="dir-btn {% if log.direction == 'IN' %}active{% endif %}" data-dir-target="log-direction" data-dir="IN" aria-pressed="{{ 'true' if log.direction == 'IN' else 'false' }}">Masuk (IN)</button>
+      <button type="button" class="dir-btn {% if log.direction == 'OUT' %}active{% endif %}" data-dir-target="log-direction" data-dir="OUT" aria-pressed="{{ 'true' if log.direction == 'OUT' else 'false' }}">Keluar (OUT)</button>
     </div>
     <input type="hidden" id="log-direction" value="{{ log.direction }}">
 
@@ -84,14 +84,15 @@
       {% for cat in visit_categories %}
         <button type="button"
                 class="cat-btn {% if log.visit_category == cat %}active{% endif %}"
-                data-cat="{{ cat }}">
+                data-cat="{{ cat }}"
+                aria-pressed="{{ 'true' if log.visit_category == cat else 'false' }}">
           {{ visit_category_labels.get(cat, cat) }}
         </button>
       {% endfor %}
     </div>
     <input type="hidden" id="log-category" value="{{ log.visit_category }}">
 
-    <div class="cat-panel" data-cat-panel="GUEST">
+    <div class="cat-panel {% if log.visit_category != 'GUEST' %}is-hidden{% endif %}" data-cat-panel="GUEST" aria-hidden="{{ 'false' if log.visit_category == 'GUEST' else 'true' }}">
       <p class="muted small"><strong>Panel Tamu / Vendor</strong></p>
       <label>Nama Tamu
         <input id="f-guest-name" maxlength="120" value="{{ log.driver_or_guest_name }}" placeholder="Nama lengkap tamu">
@@ -104,7 +105,7 @@
       </label>
     </div>
 
-    <div class="cat-panel" data-cat-panel="CARGO_LOGISTIC">
+    <div class="cat-panel {% if log.visit_category != 'CARGO_LOGISTIC' %}is-hidden{% endif %}" data-cat-panel="CARGO_LOGISTIC" aria-hidden="{{ 'false' if log.visit_category == 'CARGO_LOGISTIC' else 'true' }}">
       <p class="muted small"><strong>Panel Kargo &amp; Bea Cukai</strong></p>
       <label>Nama Ekspedisi / Vendor
         <input id="f-cargo-company" maxlength="120" value="{{ log.company_or_vendor }}" placeholder="mis. PT Mitra Logistik">
@@ -130,7 +131,7 @@
       </label>
     </div>
 
-    <div class="cat-panel" data-cat-panel="COMPANY_CAR EMPLOYEE">
+    <div class="cat-panel {% if log.visit_category not in ('COMPANY_CAR', 'EMPLOYEE') %}is-hidden{% endif %}" data-cat-panel="COMPANY_CAR EMPLOYEE" aria-hidden="{{ 'false' if log.visit_category in ('COMPANY_CAR', 'EMPLOYEE') else 'true' }}">
       <p class="muted small"><strong>Panel Mobil Perusahaan / Karyawan</strong></p>
       <label>Nama Pengemudi
         <input id="f-emp-driver" maxlength="120" value="{{ log.driver_or_guest_name }}" placeholder="Nama pengemudi / karyawan">

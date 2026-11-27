@@ -11,6 +11,11 @@
       koreksi perspektif → OCR → dekode stiker → fusi → keputusan.
     </p>
     <form id="upload-form">
+      <div class="dir-switch" role="group" aria-label="Arah Gerbang Foto Manual">
+        <button type="button" class="dir-btn active" data-dir-target="upload-direction" data-dir="IN" aria-pressed="true">Gerbang Masuk (IN)</button>
+        <button type="button" class="dir-btn" data-dir-target="upload-direction" data-dir="OUT" aria-pressed="false">Gerbang Keluar (OUT)</button>
+      </div>
+      <input type="hidden" id="upload-direction" name="direction" value="IN">
       <input type="file" id="upload-files" name="images" accept="image/*" multiple required>
       <button type="submit">Proses Foto</button>
     </form>

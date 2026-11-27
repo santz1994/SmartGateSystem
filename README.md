@@ -10,7 +10,7 @@ Hasil OCR yang melanggar tata bahasa plat Indonesia ditolak keras (dianggap tida
 
 | Path | Isi & Peran |
 | :--- | :--- |
-| [`docs/`](docs/) | Seluruh dokumentasi & laporan (`.md`) + daftar pustaka Mendeley: [PRD](docs/PRD.md), [TECHNICAL](docs/TECHNICAL.md), [SYSTEM_FLOW](docs/SYSTEM_FLOW.md), [API](docs/API.md), [DATABASE](docs/DATABASE.md), [PRESENTASI](docs/PRESENTASI.md), [LAPORAN_KP_TEMUAN](docs/LAPORAN_KP_TEMUAN.md), [TUGAS_PENGOLAHAN_CITRA_DIGITAL](docs/TUGAS_PENGOLAHAN_CITRA_DIGITAL.md), [TRAINING_GUIDE](docs/TRAINING_GUIDE.md), [SmartGateSystem-audit-report](docs/SmartGateSystem-audit-report.md), dan [AUDIT_FULL_CODE_ML](docs/AUDIT_FULL_CODE_ML.md) |
+| [`docs/`](docs/) | Seluruh dokumentasi & laporan (`.md`) + daftar pustaka Mendeley: [PRD](docs/PRD.md), [TECHNICAL](docs/TECHNICAL.md), [SYSTEM_FLOW](docs/SYSTEM_FLOW.md), [API](docs/API.md), [DATABASE](docs/DATABASE.md), [PRESENTASI](docs/PRESENTASI.md), [LAPORAN_KP_TEMUAN](docs/LAPORAN_KP_TEMUAN.md), [TUGAS_PENGOLAHAN_CITRA_DIGITAL](docs/TUGAS_PENGOLAHAN_CITRA_DIGITAL.md), [TRAINING_GUIDE](docs/TRAINING_GUIDE.md), [SmartGateSystem-audit-report](docs/SmartGateSystem-audit-report.md), [AUDIT_FULL_CODE_ML](docs/AUDIT_FULL_CODE_ML.md), dan [AUDIT_UI_UX_FRONTEND](docs/AUDIT_UI_UX_FRONTEND.md) |
 | [`Tugas Citra Digital/prototype/`](Tugas%20Citra%20Digital/prototype/) | **Aplikasi utama (Flask Prototype)**: pipeline pengolahan citra, detektor YOLO/OpenCV, engine OCR + normalisasi NRKB, dashboard satpam, kamera live, dan test suite |
 | `smartgate-artifacts-*/` | Artefak hasil training Colab/Kaggle (`best.pt`, `best.onnx`, `evaluation_summary.json`, `results.csv`, `confusion_matrix.png`) untuk YOLOv8n dan YOLOv11n |
 

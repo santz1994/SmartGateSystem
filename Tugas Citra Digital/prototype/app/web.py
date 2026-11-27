@@ -207,7 +207,7 @@ def create_app() -> Flask:
     def security_headers(resp: Any) -> Any:
         """Header keamanan (M3) — CSP juga menahan XSS yang lolos escape."""
         resp.headers["Content-Security-Policy"] = (
-            "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+            "default-src 'self'; img-src 'self' data:; style-src 'self'"
         )
         resp.headers["X-Content-Type-Options"] = "nosniff"
         resp.headers["X-Frame-Options"] = "DENY"

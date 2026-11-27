@@ -60,10 +60,12 @@ function renderResult(data) {
             .join(' · ')}
         </p>`
       : ''}
+    <div class="table-scroll">
     <table class="data">
       <thead><tr><th>Frame</th><th>Sumber</th><th>Plat</th><th>Conf</th><th>Stiker</th><th>Conf</th><th>Ketajaman</th><th></th></tr></thead>
       <tbody>${frames}</tbody>
     </table>
+    </div>
     ${data.log_deduped ? '<p class="muted small">Plat sama baru saja dicatat — log tidak diduplikasi (1 kendaraan = 1 kejadian).</p>' : ''}
     ${data.log_id ? `<p><a class="btn" href="/logs/${esc(data.log_id)}">Lihat detail &amp; tahap pipeline</a></p>` : ''}
   `;
@@ -87,19 +89,27 @@ document.querySelectorAll('button.dir-btn[data-dir-target]').forEach((button) =>
     input.value = button.dataset.dir || 'IN';
     document
       .querySelectorAll(`button.dir-btn[data-dir-target="${targetId}"]`)
-      .forEach((b) => b.classList.toggle('active', b === button));
+      .forEach((b) => {
+        const active = b === button;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-pressed', String(active));
+      });
   });
 });
 
-/* --- Panel kategori kunjungan dinamis (log_detail.html) --- */
+/* --- Panel kategori kunjungan dinamis (log_detail.html, CSP-safe via .is-hidden) --- */
 const logCatInput = $('#log-category');
 function syncCategoryPanels(category) {
   document.querySelectorAll('.cat-panel[data-cat-panel]').forEach((panel) => {
     const cats = (panel.dataset.catPanel || '').split(/\s+/);
-    panel.hidden = !cats.includes(category);
+    const visible = cats.includes(category);
+    panel.classList.toggle('is-hidden', !visible);
+    panel.setAttribute('aria-hidden', String(!visible));
   });
   document.querySelectorAll('button.cat-btn[data-cat]').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.cat === category);
+    const active = btn.dataset.cat === category;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', String(active));
   });
 }
 if (logCatInput) {
@@ -148,9 +158,11 @@ if (uploadForm) {
 
     const form = new FormData();
     for (const file of files) form.append('images', file);
+    const dir = $('#upload-direction') ? $('#upload-direction').value : 'IN';
+    form.append('direction', dir);
 
     try {
-      const res = await fetch('/api/evaluate', {
+      const res = await fetch(`/api/evaluate?direction=${encodeURIComponent(dir)}`, {
         method: 'POST',
         body: form,
         headers: { 'X-CSRF-Token': csrfToken() },

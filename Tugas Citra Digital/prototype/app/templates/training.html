@@ -81,7 +81,7 @@
         <td>{{ '%.2f'|format(e['metrics/recall(B)']|default(0, true)|float) }}</td>
         <td><strong>{{ '%.3f'|format(e['metrics/mAP50(B)']|default(0, true)|float) }}</strong></td>
         <td>{{ '%.3f'|format(e['metrics/mAP50-95(B)']|default(0, true)|float) }}</td>
-        <td><div class="map-bar" style="width:{{ (e['metrics/mAP50(B)']|default(0, true)|float * 80)|round|int }}px"></div></td>
+        <td><progress class="map-progress" max="100" value="{{ (e['metrics/mAP50(B)']|default(0, true)|float * 100)|round|int }}"></progress></td>
       </tr>
       {% else %}
       <tr><td colspan="9" class="muted">Training belum dimulai / results.csv belum ada.</td></tr>

@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Kartu KPI operasional di `dashboard.html` (*Kendaraan di Dalam Area*, *Kargo/Bea Cukai Hari Ini*, *Tamu & Mobil Dinas Aktif*) serta pemilih arah cepat (`IN`/`OUT`) di `dashboard.html` dan `camera.html`.
   - Form dinamis berbasis JavaScript vanilla di `log_detail.html` (panel Tamu, panel Kargo & Bea Cukai, panel Mobil Perusahaan/Karyawan) + kartu relasi Pasangan Log `IN` ↔ `OUT` beserta durasi kunjungan.
 - **Pengujian Otomatis**: Penambahan uji migrasi skema lama, pairing `IN`↔`OUT`, validasi metadata kargo/tamu, RBAC `hrga` & `beacukai` (HTTP 403), dan ekspor CSV di `tests/test_pipeline.py` (**170 pemeriksaan lulus**).
+- **Audit & Perbaikan UI/UX Frontend (`docs/AUDIT_UI_UX_FRONTEND.md`)**: Target sentuh ≥ 44px untuk `.dir-btn`/`.cat-btn`, tata letak sel bertingkat (`.cell-stack`) + `.table-scroll` (termasuk tabel hasil `renderResult()` di `app.js`), panel kategori CSP-safe (`.is-hidden` + `aria-hidden`/`aria-pressed`), pemilih arah `IN`/`OUT` di `upload.html`, KPI dashboard ter-scope untuk `beacukai`, serta penghapusan seluruh inline `style="..."` di `login.html` & `training.html` sehingga CSP diperketat menjadi `style-src 'self'` (tanpa `'unsafe-inline'`).
 
 ### Changed
 - `service.evaluate()` kini menerima parameter `direction` dan `metadata`, melakukan deduplikasi cooldown per kombinasi `(direction, plate_text)`, serta menggabungkan metadata otomatis dari `vehicle_bookings` dan `master_vehicles`.

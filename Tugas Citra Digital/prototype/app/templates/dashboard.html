@@ -2,20 +2,23 @@
 {% block title %}Dashboard — Smart Gate{% endblock %}
 
 {% block content %}
+{% set is_bc = auth.current_role() == 'beacukai' %}
 <section class="kpi-grid" id="kpi-strip">
-  <a class="kpi-card" href="{{ url_for('logs_page', status='UNCLOSED_IN') }}">
-    <span class="kpi-label">Kendaraan di Dalam Area (Unclosed IN)</span>
+  <a class="kpi-card" href="{{ url_for('logs_page', status='UNCLOSED_IN', visit_category='CARGO_LOGISTIC' if is_bc else None) }}">
+    <span class="kpi-label">{{ 'Kargo di Dalam Area (Unclosed IN)' if is_bc else 'Kendaraan di Dalam Area (Unclosed IN)' }}</span>
     <strong class="kpi-value warn">{{ stats.get('UNCLOSED_IN', 0) }}</strong>
   </a>
   <a class="kpi-card" href="{{ url_for('logs_page', visit_category='CARGO_LOGISTIC') }}">
     <span class="kpi-label">Pergerakan Kargo / Bea Cukai Hari Ini</span>
     <strong class="kpi-value accent">{{ stats.get('CARGO_TODAY', 0) }}</strong>
   </a>
+  {% if not is_bc %}
   <a class="kpi-card" href="{{ url_for('logs_page', visit_category='GUEST', status='UNCLOSED_IN') }}">
     <span class="kpi-label">Tamu &amp; Mobil Dinas Aktif</span>
     <strong class="kpi-value ok">{{ stats.get('ACTIVE_GUEST_COMPANY', 0) }}</strong>
     <span class="muted small">Jadwal aktif: {{ stats.get('ACTIVE_BOOKINGS', 0) }}</span>
   </a>
+  {% endif %}
 </section>
 
 <section class="grid">
@@ -102,24 +105,32 @@
   <div class="table-scroll">
   <table class="data">
     <thead>
-      <tr><th>#</th><th>Waktu</th><th>Arah</th><th>Kategori</th><th>Plat</th><th>Dokumen BC</th><th>Durasi</th><th>Keputusan</th><th>Foto</th><th></th></tr>
+      <tr><th>#</th><th>Waktu</th><th>Arah &amp; Kategori</th><th>Plat</th><th>Dokumen BC</th><th>Keputusan &amp; Durasi</th><th>Foto</th><th></th></tr>
     </thead>
     <tbody id="log-table-body">
       {% for log in logs %}
       <tr>
         <td>{{ log.id }}</td>
         <td class="muted small">{{ log.created_at }}</td>
-        <td><span class="badge dir-{{ log.direction }}">{{ log.direction }}</span></td>
-        <td class="small"><span class="badge cat-{{ log.visit_category }}">{{ visit_category_labels.get(log.visit_category, log.visit_category) }}</span></td>
+        <td>
+          <div class="cell-stack">
+            <span class="badge dir-{{ log.direction }}">{{ log.direction }}</span>
+            <span class="badge cat-{{ log.visit_category }}">{{ visit_category_labels.get(log.visit_category, log.visit_category) }}</span>
+          </div>
+        </td>
         <td><code>{{ log.plate_text or '—' }}</code></td>
-        <td class="small">{{ log.bc_doc_type if log.bc_doc_type != 'NONE' else '—' }}{% if log.bc_doc_number %} <code>{{ log.bc_doc_number }}</code>{% endif %}</td>
-        <td class="muted small">{{ format_dwell(log.dwell_minutes) }}</td>
-        <td><span class="badge {{ alerts[log.decision] }}">{{ labels[log.decision] }}</span></td>
+        <td class="small">{{ log.bc_doc_type if log.bc_doc_type != 'NONE' else '—' }}{% if log.bc_doc_number %}<div class="muted"><code>{{ log.bc_doc_number }}</code></div>{% endif %}</td>
+        <td>
+          <div class="cell-stack">
+            <span class="badge {{ alerts[log.decision] }}">{{ labels[log.decision] }}</span>
+            <span class="muted small">{{ format_dwell(log.dwell_minutes) }}</span>
+          </div>
+        </td>
         <td>{% if log.snapshot_url %}<img class="thumb" src="{{ url_for('snapshot', relative=log.snapshot_url.replace('snapshots/','')) }}" alt="snapshot">{% else %}—{% endif %}</td>
         <td><a class="btn small" href="{{ url_for('log_detail', log_id=log.id) }}">Detail</a></td>
       </tr>
       {% else %}
-      <tr><td colspan="10" class="muted">Belum ada log. Jalankan simulasi atau unggah foto.</td></tr>
+      <tr><td colspan="8" class="muted">Belum ada log. Jalankan simulasi atau unggah foto.</td></tr>
       {% endfor %}
     </tbody>
   </table>

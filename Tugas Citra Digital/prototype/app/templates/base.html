@@ -16,23 +16,24 @@
       <span class="muted">Sistem Log Kendaraan Terpadu</span>
     </div>
     {% set role = auth.current_role() %}
+    {% set ep = request.endpoint or '' %}
     {% if role %}
-    <nav>
-      <a href="{{ url_for('dashboard') }}">Dashboard</a>
+    <nav aria-label="Navigasi Utama">
+      <a href="{{ url_for('dashboard') }}" {% if ep == 'dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
       {% if role in ('admin', 'satpam') %}
-        <a href="{{ url_for('upload_page') }}">Foto Manual</a>
-        <a href="{{ url_for('camera_page') }}">Kamera</a>
+        <a href="{{ url_for('upload_page') }}" {% if ep == 'upload_page' %}aria-current="page"{% endif %}>Foto Manual</a>
+        <a href="{{ url_for('camera_page') }}" {% if ep == 'camera_page' %}aria-current="page"{% endif %}>Kamera</a>
       {% endif %}
       {% if role in ('admin', 'satpam', 'hrga') %}
-        <a href="{{ url_for('vehicles_page') }}">Kendaraan</a>
+        <a href="{{ url_for('vehicles_page') }}" {% if ep == 'vehicles_page' %}aria-current="page"{% endif %}>Kendaraan</a>
       {% endif %}
       {% if role in ('admin', 'hrga') %}
-        <a href="{{ url_for('bookings_page') }}">Jadwal / Izin</a>
+        <a href="{{ url_for('bookings_page') }}" {% if ep == 'bookings_page' %}aria-current="page"{% endif %}>Jadwal / Izin</a>
       {% endif %}
       {% if role == 'admin' %}
-        <a href="{{ url_for('training_page') }}">Training</a>
+        <a href="{{ url_for('training_page') }}" {% if ep == 'training_page' %}aria-current="page"{% endif %}>Training</a>
       {% endif %}
-      <a href="{{ url_for('logs_page') }}">{{ 'Log Bea Cukai' if role == 'beacukai' else 'Log Audit' }}</a>
+      <a href="{{ url_for('logs_page') }}" {% if ep in ('logs_page', 'log_detail') %}aria-current="page"{% endif %}>{{ 'Log Bea Cukai' if role == 'beacukai' else 'Log Audit' }}</a>
       <a href="{{ url_for('api_health') }}" target="_blank">Health</a>
     </nav>
     <div class="userbar muted">

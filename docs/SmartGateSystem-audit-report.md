@@ -535,4 +535,9 @@ Untuk mencegah degradasi di paruh akhir epoch (seperti yang terjadi pada Epoch 3
    - Memuat `paddlex` sebelum `import paddle` di `_configure_paddle_cpu()` (`app/ocr.py:368-398`) untuk menghilangkan konflik DLL Windows `[WinError 127] torch\lib\shm.dll` dan `RuntimeError: PDX has already been initialized`.
 5. **Verifikasi Otomatis Akhir**: Seluruh **`151 pemeriksaan`** di `tests/test_pipeline.py` (termasuk pengujian nyata `plat-nomor/test` dengan `backend=paddleocr` + `opencv-dnn-onnx`, serta regresi `M-1`, `L-1`, `L-2`, `L-3`, `L-4`) lulus 100%.
 
+### ✅ Tahap 5 (SELESAI — 27 November 2026) — Sistem Log Terpadu, RBAC 4 Peran & Audit UI/UX Frontend (`UI-1` s.d. `UI-6`)
+- Implementasi penuh log kendaraan terpadu (`gate_logs` 10 kolom baru, `vehicle_bookings`, pairing otomatis `IN`↔`OUT` + `dwell_minutes`, RBAC `admin`/`satpam`/`hrga`/`beacukai`, serta ekspor CSV UTF-8 BOM).
+- Audit & perbaikan menyeluruh UI/UX Frontend terdokumentasi lengkap di [`AUDIT_UI_UX_FRONTEND.md`](AUDIT_UI_UX_FRONTEND.md): target sentuh ≥ 44px, sel bertingkat `.cell-stack` + `.table-scroll` (bebas overflow 360px & 1366px), panel kategori CSP-safe `.is-hidden`, penghapusan seluruh inline `style="..."` sehingga CSP diperketat menjadi `style-src 'self'`, serta konsistensi RBAC visual.
+- **Verifikasi Akhir**: **`170/170` pemeriksaan otomatis** di `tests/test_pipeline.py` lulus 100%.
+
 
