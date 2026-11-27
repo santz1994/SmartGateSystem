@@ -5,7 +5,11 @@
 <section class="grid">
   <div class="card">
     <h2>Log #{{ log.id }}</h2>
-    <p><span class="badge {{ alerts[log.decision] }}">{{ labels[log.decision] }}</span></p>
+    <p class="badge-row">
+      <span class="badge {{ alerts[log.decision] }}">{{ labels[log.decision] }}</span>
+      <span class="badge dir-{{ log.direction }}">{{ 'MASUK (IN)' if log.direction == 'IN' else 'KELUAR (OUT)' }}</span>
+      <span class="badge cat-{{ log.visit_category }}">{{ visit_category_labels.get(log.visit_category, log.visit_category) }}</span>
+    </p>
     <table class="kv">
       <tr><td>Session</td><td><code>{{ log.session_id }}</code></td></tr>
       <tr><td>Waktu</td><td>{{ log.created_at }}</td></tr>
@@ -13,14 +17,41 @@
       <tr><td>Stiker</td><td><code>{{ log.sticker_code or '—' }}</code></td></tr>
       <tr><td>Skor fusi</td><td>{{ '%.2f'|format(log.fused_score) }}</td></tr>
       <tr><td>Alasan</td><td>{{ log.reason or '—' }}</td></tr>
+      <tr><td>Pengemudi / Tamu</td><td>{{ log.driver_or_guest_name or '—' }}</td></tr>
+      <tr><td>Perusahaan / Ekspedisi</td><td>{{ log.company_or_vendor or '—' }}</td></tr>
+      <tr><td>Tujuan / PIC</td><td>{{ log.visit_purpose_or_host or '—' }}</td></tr>
+      <tr><td>Dokumen BC / Jalan</td><td>{{ log.bc_doc_type if log.bc_doc_type != 'NONE' else '—' }}{% if log.bc_doc_number %} · <code>{{ log.bc_doc_number }}</code>{% endif %}</td></tr>
+      <tr><td>Nomor Segel</td><td><code>{{ log.seal_number or '—' }}</code></td></tr>
       <tr><td>Satpam</td><td>{{ log.override_by or '—' }}</td></tr>
-      <tr><td>Catatan</td><td>{{ log.override_note or '—' }}</td></tr>
+      <tr><td>Catatan Audit</td><td>{{ log.override_note or '—' }}</td></tr>
       <tr><td>Waktu tindakan</td><td>{{ log.override_at or '—' }}</td></tr>
     </table>
   </div>
 
   <div class="card">
-    <h2>Snapshot</h2>
+    <h2>Pasangan Log Masuk ↔ Keluar</h2>
+    {% if paired_log %}
+      <div class="pair-box">
+        <p>
+          <span class="badge dir-{{ log.direction }}">{{ log.direction }} #{{ log.id }}</span>
+          <span class="muted">↔</span>
+          <span class="badge dir-{{ paired_log.direction }}">{{ paired_log.direction }} #{{ paired_log.id }}</span>
+        </p>
+        <p>Durasi Kunjungan: <span class="badge GREEN">{{ dwell_label }}</span></p>
+        <table class="kv">
+          <tr><td>Log Pasangan</td><td><a class="btn small" href="{{ url_for('log_detail', log_id=paired_log.id) }}">Lihat Log #{{ paired_log.id }}</a></td></tr>
+          <tr><td>Waktu {{ paired_log.direction }}</td><td>{{ paired_log.created_at }}</td></tr>
+          <tr><td>Plat</td><td><code>{{ paired_log.plate_text or '—' }}</code></td></tr>
+        </table>
+      </div>
+    {% elif log.direction == 'IN' %}
+      <p><span class="badge AMBER">Kendaraan Masih di Dalam Area (Unclosed IN)</span></p>
+      <p class="muted small">Belum ada log <code>OUT</code> yang terpasang untuk nomor plat ini.</p>
+    {% else %}
+      <p class="muted">Tidak ada log <code>IN</code> terbuka yang cocok untuk dipasangkan.</p>
+    {% endif %}
+
+    <h2 class="mt">Snapshot Bukti</h2>
     {% if log.snapshot_url %}
       <img class="snapshot" src="{{ url_for('snapshot', relative=log.snapshot_url.replace('snapshots/','')) }}" alt="snapshot">
     {% else %}
@@ -28,20 +59,103 @@
     {% endif %}
   </div>
 
-  {% if pending %}
+  {% if can_act %}
   <div class="card">
-    <h2>Tindakan Satpam</h2>
-    <p class="muted">Bypass dan penolakan wajib disertai catatan — tercatat permanen di log audit.</p>
+    <h2>{{ 'Tindakan Satpam &amp; Pencatatan Log' if pending else 'Lengkapi Metadata Kunjungan' }}</h2>
+    {% if pending %}
+      <p class="muted small">Bypass dan penolakan wajib disertai catatan — tercatat permanen di log audit.</p>
+    {% else %}
+      <p class="muted small">Keputusan sudah final (<code>{{ log.decision }}</code>). Anda tetap dapat melengkapi data pengemudi, tamu, atau dokumen Bea Cukai.</p>
+    {% endif %}
+
     <label>Petugas
-      <input value="{{ auth.current_user() }} ({{ auth.current_role() }})" readonly>
+      <input value="{{ auth.current_user() }} ({{ role_labels.get(auth.current_role(), auth.current_role()) }})" readonly>
     </label>
-    <label>Catatan (wajib)
-      <textarea id="guard-note" rows="3" placeholder="mis. Sudah dicek KTP & STNK, kendaraan tamu keluarga."></textarea>
+
+    <label>Arah Gerbang</label>
+    <div class="dir-switch" role="group" aria-label="Arah Log">
+      <button type="button" class="dir-btn {% if log.direction == 'IN' %}active{% endif %}" data-dir-target="log-direction" data-dir="IN">Masuk (IN)</button>
+      <button type="button" class="dir-btn {% if log.direction == 'OUT' %}active{% endif %}" data-dir-target="log-direction" data-dir="OUT">Keluar (OUT)</button>
+    </div>
+    <input type="hidden" id="log-direction" value="{{ log.direction }}">
+
+    <label>Kategori Kunjungan</label>
+    <div class="cat-switch" role="group" aria-label="Kategori Kunjungan">
+      {% for cat in visit_categories %}
+        <button type="button"
+                class="cat-btn {% if log.visit_category == cat %}active{% endif %}"
+                data-cat="{{ cat }}">
+          {{ visit_category_labels.get(cat, cat) }}
+        </button>
+      {% endfor %}
+    </div>
+    <input type="hidden" id="log-category" value="{{ log.visit_category }}">
+
+    <div class="cat-panel" data-cat-panel="GUEST">
+      <p class="muted small"><strong>Panel Tamu / Vendor</strong></p>
+      <label>Nama Tamu
+        <input id="f-guest-name" maxlength="120" value="{{ log.driver_or_guest_name }}" placeholder="Nama lengkap tamu">
+      </label>
+      <label>Instansi / Perusahaan
+        <input id="f-guest-company" maxlength="120" value="{{ log.company_or_vendor }}" placeholder="mis. PT Vendor Nusantara">
+      </label>
+      <label>PIC / Departemen Tujuan
+        <input id="f-guest-host" maxlength="200" value="{{ log.visit_purpose_or_host }}" placeholder="mis. HRGA / Ibu Rina">
+      </label>
+    </div>
+
+    <div class="cat-panel" data-cat-panel="CARGO_LOGISTIC">
+      <p class="muted small"><strong>Panel Kargo &amp; Bea Cukai</strong></p>
+      <label>Nama Ekspedisi / Vendor
+        <input id="f-cargo-company" maxlength="120" value="{{ log.company_or_vendor }}" placeholder="mis. PT Mitra Logistik">
+      </label>
+      <label>Nama Sopir
+        <input id="f-cargo-driver" maxlength="120" value="{{ log.driver_or_guest_name }}" placeholder="Nama sopir">
+      </label>
+      <label>Tujuan / Gudang
+        <input id="f-cargo-purpose" maxlength="200" value="{{ log.visit_purpose_or_host }}" placeholder="mis. Bongkar Muat Gudang A">
+      </label>
+      <label>Jenis Dokumen BC / Surat Jalan
+        <select id="f-bc-type">
+          {% for doc in bc_doc_types %}
+            <option value="{{ doc }}" {% if log.bc_doc_type == doc %}selected{% endif %}>{{ doc }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Nomor Dokumen BC / Aju / Surat Jalan
+        <input id="f-bc-number" maxlength="64" value="{{ log.bc_doc_number }}" placeholder="mis. 000123-20261127">
+      </label>
+      <label>Nomor Segel (Seal)
+        <input id="f-seal-number" maxlength="64" value="{{ log.seal_number }}" placeholder="mis. SL-889201">
+      </label>
+    </div>
+
+    <div class="cat-panel" data-cat-panel="COMPANY_CAR EMPLOYEE">
+      <p class="muted small"><strong>Panel Mobil Perusahaan / Karyawan</strong></p>
+      <label>Nama Pengemudi
+        <input id="f-emp-driver" maxlength="120" value="{{ log.driver_or_guest_name }}" placeholder="Nama pengemudi / karyawan">
+      </label>
+      <label>Departemen / Unit
+        <input id="f-emp-company" maxlength="120" value="{{ log.company_or_vendor }}" placeholder="mis. Operasional / Produksi">
+      </label>
+      <label>Tujuan / Nomor Surat Tugas
+        <input id="f-emp-purpose" maxlength="200" value="{{ log.visit_purpose_or_host }}" placeholder="mis. Dinas Luar / ST-045">
+      </label>
+    </div>
+
+    {% if pending %}
+    <label>Catatan Audit (wajib untuk Bypass / Tolak)
+      <textarea id="guard-note" rows="3" placeholder="mis. Sudah dicek KTP, STNK, dan dokumen BC 4.0 sesuai."></textarea>
     </label>
     <div class="actions">
-      <button class="ok" data-action="bypass" data-log="{{ log.id }}">Bypass — Buka Pintu Manual</button>
-      <button class="bad" data-action="reject" data-log="{{ log.id }}">Tolak Akses</button>
+      <button class="ok" type="button" data-action="bypass" data-log="{{ log.id }}">Bypass — Buka Pintu Manual</button>
+      <button class="bad" type="button" data-action="reject" data-log="{{ log.id }}">Tolak Akses</button>
     </div>
+    {% else %}
+    <div class="actions">
+      <button type="button" data-action="update" data-log="{{ log.id }}">Simpan Metadata Kunjungan</button>
+    </div>
+    {% endif %}
     <p id="guard-msg" class="muted small"></p>
   </div>
   {% endif %}

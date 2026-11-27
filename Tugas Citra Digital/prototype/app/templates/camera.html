@@ -6,35 +6,38 @@
   <div class="card">
     <h2>Kamera &amp; Auto Scan Plat</h2>
     <p class="muted">
-      Aktifkan kamera (webcam / CCTV yang dikenali browser), lalu pindai plat nomor
-      secara manual atau otomatis. Scan manual memakai pipeline penuh, sedangkan
-      auto scan memakai jalur plat cepat agar kendaraan yang bergerak tidak terlewat.
+      Aktifkan kamera (webcam / CCTV yang dikenali browser), pilih arah gerbang,
+      lalu pindai plat nomor secara manual atau otomatis.
     </p>
+    <div class="dir-switch" role="group" aria-label="Arah Gerbang Kamera">
+      <button type="button" class="dir-btn active" data-dir-target="cam-direction" data-dir="IN">Gerbang Masuk (IN)</button>
+      <button type="button" class="dir-btn" data-dir-target="cam-direction" data-dir="OUT">Gerbang Keluar (OUT)</button>
+    </div>
+    <input type="hidden" id="cam-direction" value="IN">
+
     <div class="cam-stage">
       <video id="cam-video" autoplay playsinline muted class="snapshot"></video>
       <canvas id="cam-overlay"></canvas>
     </div>
     <canvas id="cam-canvas" hidden></canvas>
-    <p>
+    <p class="actions">
       <button id="cam-start" type="button">Aktifkan Kamera</button>
       <button id="cam-stop" type="button">Matikan</button>
-      <button id="cam-scan" type="button">Scan &amp; Simpan Log</button>
+      <button id="cam-scan" type="button" class="ok">Scan &amp; Simpan Log</button>
+    </p>
+    <p>
       <label>Kamera
         <select id="cam-device">
           <option value="">Otomatis</option>
         </select>
       </label>
     </p>
-    <p>
+    <p class="actions">
       <button id="cam-plate-toggle" type="button" aria-pressed="true">Plat: Aktif</button>
       <button id="cam-sticker-toggle" type="button" aria-pressed="true">Stiker: Aktif</button>
     </p>
-    <p class="muted small">
-      Nonaktifkan pembacaan yang tidak diperlukan untuk menghindari hasil OCR/dekode
-      yang salah pada frame tertentu.
-    </p>
     <p>
-      <label><input type="checkbox" id="cam-auto"> Auto scan</label>
+      <label class="check"><input type="checkbox" id="cam-auto"> Auto scan</label>
       <label>Interval
         <select id="cam-interval">
           <option value="1500" selected>1,5 detik (cepat)</option>
@@ -46,7 +49,7 @@
     </p>
     <p class="muted small">
       Auto scan tidak menulis log (hanya preview). Gunakan
-      <strong>Scan &amp; Simpan Log</strong> untuk mencatat kejadian resmi + foto.
+      <strong>Scan &amp; Simpan Log</strong> untuk mencatat kejadian resmi + foto (dan memasangkan log <code>OUT</code> ke log <code>IN</code> otomatis).
     </p>
     <p class="muted">Status: <strong id="cam-status">Kamera belum aktif.</strong></p>
   </div>

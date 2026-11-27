@@ -252,3 +252,40 @@ Pada prototype Flask saat ini (`Tugas Citra Digital/prototype/`):
 - Harani, N. H., Prianto, C., dan Hasanah, M. (2019). *Deteksi Objek dan Pengenalan Karakter Plat Nomor Kendaraan Indonesia Menggunakan Metode CNN Berbasis Python*. Jurnal Teknik Informatika Vol. 11 No. 3. [PDF](artc/658-Article%20Text-963-1-10-20200213.pdf)
 - Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor Kendaraan Menggunakan Algoritma CNN Berbasis Tensorflow*. Remik Vol. 9 No. 3. DOI [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169). [PDF](artc/15169-Article%20Text-24310-1-10-20250811.pdf)
 - [Axelera AI — Home Assistant CCTV Object and Motion Detection Using Metis](https://community.axelera.ai/the-axelera-forum-52/home-assistant-cctv-object-and-motion-detection-using-metis-1226) · [`axelera-ai-hub/voyager-sdk`](https://github.com/axelera-ai-hub/voyager-sdk) — referensi NPU & cascaded pipeline LPR.
+
+
+---
+
+## 7. Alur Log Kendaraan Terpadu & Kepatuhan (Satpam, HRGA, Bea Cukai)
+
+```mermaid
+flowchart TD
+    A["Kendaraan Tiba (Pilih Arah: IN / OUT)"] --> B["Scan Kamera / Simulasi / Upload"]
+    B --> C["Deteksi YOLO ONNX + OCR Perpol 7/2021"]
+    C --> D["Cek master_vehicles & vehicle_bookings (ACTIVE)"]
+    D --> E{"Cocok & Skor >= Ambang?"}
+    E -- Ya --> F["AUTO_OPEN + Auto-fill Metadata Kategori & Dokumen BC"]
+    E -- Tidak --> G["Alert Satpam (NO_MATCH / OCR_FAILED / LOW_CONFIDENCE)"]
+    G --> H["Form Dinamis Satpam: Kategori (Mobil Dinas / Karyawan / Kargo BC / Tamu)"]
+    H --> I{"Keputusan Satpam"}
+    I -- Bypass --> J["MANUAL_OVERRIDE + Catatan Wajib"]
+    I -- Tolak --> K["REJECTED + Catatan Wajib"]
+    F --> L{"Arah = OUT?"}
+    J --> L
+    L -- Ya --> M["Pairing Otomatis ke Log IN Terbuka + Hitung dwell_minutes"]
+    L -- Tidak --> N["Tercatat sebagai UNCLOSED_IN (Di Dalam Area)"]
+    M --> O[("gate_logs + Snapshot Bukti")]
+    N --> O
+    K --> O
+    O --> P["HRGA: Audit Log, Kelola /bookings, Export CSV"]
+    O --> Q["Bea Cukai: Log CARGO_LOGISTIC, Cek Dokumen BC & Segel, Export CSV"]
+```
+
+### Matriks RBAC Prototipe
+
+| Peran | Dashboard & Scan (`IN`/`OUT`) | `MANUAL_OVERRIDE` / `REJECTED` | `/bookings` (Jadwal HRGA) | `/vehicles` (Master) | `/logs` & Export CSV | `/api/settings` & `/training` |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`admin`** | Penuh | Penuh | Penuh | CRUD Penuh | Semua Kategori | Penuh |
+| **`satpam`** | Penuh | Penuh | Ditolak (403) | *Read-only* | Semua Kategori | Ditolak (403) |
+| **`hrga`** | Ringkasan (*Read-only*) | Ditolak (403) | CRUD Penuh | *Read-only* | Semua Kategori | Ditolak (403) |
+| **`beacukai`** | Ringkasan Kargo (*Read-only*) | Ditolak (403) | Ditolak (403) | Ditolak (403) | Default `CARGO_LOGISTIC` | Ditolak (403) |

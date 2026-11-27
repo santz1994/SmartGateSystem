@@ -23,13 +23,19 @@ os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 # Versi statis untuk cache-busting app.js/style.css (L5).
-APP_VERSION = "2026.10.29b"
+APP_VERSION = "2026.11.27a"
 DATA_DIR = Path(os.getenv("SGS_DATA_DIR", BASE_DIR / "data"))
 SNAPSHOT_DIR = DATA_DIR / "snapshots"
 DIAGNOSTIC_DIR = DATA_DIR / "diag" / "ocr_failed"
 DB_PATH = Path(os.getenv("SGS_DB", DATA_DIR / "smartgate.db"))
 DIAGNOSTIC_COOLDOWN_SECONDS = 30.0
 MAX_DIAGNOSTIC_BUNDLES = 10
+
+# Password akun seed default (override via env sebelum deployment jaringan).
+ADMIN_PASSWORD = os.getenv("SGS_ADMIN_PASSWORD", "admin123")
+SATPAM_PASSWORD = os.getenv("SGS_SATPAM_PASSWORD", "satpam123")
+HRGA_PASSWORD = os.getenv("SGS_HRGA_PASSWORD", "hrga123")
+BEACUKAI_PASSWORD = os.getenv("SGS_BEACUKAI_PASSWORD", "beacukai123")
 
 # Ambang default. Nilai ini yang dipakai bila baris system_settings tidak ada.
 DEFAULTS: dict[str, float] = {

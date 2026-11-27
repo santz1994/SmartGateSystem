@@ -2,6 +2,22 @@
 {% block title %}Dashboard — Smart Gate{% endblock %}
 
 {% block content %}
+<section class="kpi-grid" id="kpi-strip">
+  <a class="kpi-card" href="{{ url_for('logs_page', status='UNCLOSED_IN') }}">
+    <span class="kpi-label">Kendaraan di Dalam Area (Unclosed IN)</span>
+    <strong class="kpi-value warn">{{ stats.get('UNCLOSED_IN', 0) }}</strong>
+  </a>
+  <a class="kpi-card" href="{{ url_for('logs_page', visit_category='CARGO_LOGISTIC') }}">
+    <span class="kpi-label">Pergerakan Kargo / Bea Cukai Hari Ini</span>
+    <strong class="kpi-value accent">{{ stats.get('CARGO_TODAY', 0) }}</strong>
+  </a>
+  <a class="kpi-card" href="{{ url_for('logs_page', visit_category='GUEST', status='UNCLOSED_IN') }}">
+    <span class="kpi-label">Tamu &amp; Mobil Dinas Aktif</span>
+    <strong class="kpi-value ok">{{ stats.get('ACTIVE_GUEST_COMPANY', 0) }}</strong>
+    <span class="muted small">Jadwal aktif: {{ stats.get('ACTIVE_BOOKINGS', 0) }}</span>
+  </a>
+</section>
+
 <section class="grid">
   <div class="card">
     <h2>Statistik Keputusan</h2>
@@ -16,9 +32,15 @@
     </table>
   </div>
 
+  {% if can_operate %}
   <div class="card">
     <h2>Simulasi CCTV 1 + CCTV 2</h2>
     <p class="muted">Hasilkan sepasang frame sintetis (pendekatan + gate) lalu jalankan pipeline penuh.</p>
+    <div class="dir-switch" role="group" aria-label="Arah Gerbang">
+      <button type="button" class="dir-btn active" data-dir-target="sim-direction" data-dir="IN">Gerbang Masuk (IN)</button>
+      <button type="button" class="dir-btn" data-dir-target="sim-direction" data-dir="OUT">Gerbang Keluar (OUT)</button>
+    </div>
+    <input type="hidden" id="sim-direction" value="IN">
     <label>Plat nomor
       <input id="sim-plate" value="B 1234 XYZ" list="plate-list">
       <datalist id="plate-list">
@@ -46,7 +68,10 @@
           <div class="pending-item" data-id="{{ log.id }}">
             <span class="badge {{ alerts[log.decision] }}">{{ labels[log.decision] }}</span>
             <div>
-              <div><code>{{ log.plate_text or '—' }}</code> · skor {{ '%.2f'|format(log.fused_score) }}</div>
+              <div>
+                <span class="badge dir-{{ log.direction }}">{{ log.direction }}</span>
+                <code>{{ log.plate_text or '—' }}</code> · skor {{ '%.2f'|format(log.fused_score) }}
+              </div>
               <div class="muted small">{{ log.reason }}</div>
             </div>
             <a class="btn small" href="{{ url_for('log_detail', log_id=log.id) }}">Tangani</a>
@@ -57,6 +82,19 @@
       {% endif %}
     </div>
   </div>
+  {% else %}
+  <div class="card">
+    <h2>Akses Cepat {{ role_labels.get(auth.current_role(), auth.current_role()) }}</h2>
+    <p class="muted">Akun Anda memiliki akses kepatuhan (<em>read-only</em> pada kontrol gerbang).</p>
+    <div class="actions">
+      <a class="btn" href="{{ url_for('logs_page') }}">Buka Log Audit</a>
+      <a class="btn" href="{{ url_for('api_export_logs_csv') }}">Export CSV Laporan</a>
+      {% if can_manage_bookings %}
+        <a class="btn" href="{{ url_for('bookings_page') }}">Kelola Jadwal / Izin Kendaraan</a>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
 </section>
 
 <section class="card">
@@ -64,22 +102,24 @@
   <div class="table-scroll">
   <table class="data">
     <thead>
-      <tr><th>#</th><th>Waktu</th><th>Plat</th><th>Stiker</th><th>Skor</th><th>Keputusan</th><th>Foto</th><th></th></tr>
+      <tr><th>#</th><th>Waktu</th><th>Arah</th><th>Kategori</th><th>Plat</th><th>Dokumen BC</th><th>Durasi</th><th>Keputusan</th><th>Foto</th><th></th></tr>
     </thead>
     <tbody id="log-table-body">
       {% for log in logs %}
       <tr>
         <td>{{ log.id }}</td>
         <td class="muted small">{{ log.created_at }}</td>
+        <td><span class="badge dir-{{ log.direction }}">{{ log.direction }}</span></td>
+        <td class="small"><span class="badge cat-{{ log.visit_category }}">{{ visit_category_labels.get(log.visit_category, log.visit_category) }}</span></td>
         <td><code>{{ log.plate_text or '—' }}</code></td>
-        <td><code>{{ log.sticker_code or '—' }}</code></td>
-        <td>{{ '%.2f'|format(log.fused_score) }}</td>
+        <td class="small">{{ log.bc_doc_type if log.bc_doc_type != 'NONE' else '—' }}{% if log.bc_doc_number %} <code>{{ log.bc_doc_number }}</code>{% endif %}</td>
+        <td class="muted small">{{ format_dwell(log.dwell_minutes) }}</td>
         <td><span class="badge {{ alerts[log.decision] }}">{{ labels[log.decision] }}</span></td>
         <td>{% if log.snapshot_url %}<img class="thumb" src="{{ url_for('snapshot', relative=log.snapshot_url.replace('snapshots/','')) }}" alt="snapshot">{% else %}—{% endif %}</td>
         <td><a class="btn small" href="{{ url_for('log_detail', log_id=log.id) }}">Detail</a></td>
       </tr>
       {% else %}
-      <tr><td colspan="8" class="muted">Belum ada log. Jalankan simulasi atau unggah foto.</td></tr>
+      <tr><td colspan="10" class="muted">Belum ada log. Jalankan simulasi atau unggah foto.</td></tr>
       {% endfor %}
     </tbody>
   </table>

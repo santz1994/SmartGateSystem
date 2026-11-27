@@ -463,3 +463,43 @@ curl -X POST http://gate-backend.local:8000/api/v1/gate/3f8c1e42/override \
 - Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor Kendaraan Menggunakan Algoritma CNN Berbasis Tensorflow*. Remik Vol. 9 No. 3. DOI [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169). [PDF](artc/15169-Article%20Text-24310-1-10-20250811.pdf)
 - Harani, N. H., Prianto, C., dan Hasanah, M. (2019). *Deteksi Objek dan Pengenalan Karakter Plat Nomor Kendaraan Indonesia Menggunakan Metode CNN Berbasis Python*. Jurnal Teknik Informatika Vol. 11 No. 3. [PDF](artc/658-Article%20Text-963-1-10-20200213.pdf)
 - [`axelera-ai-hub/voyager-sdk`](https://github.com/axelera-ai-hub/voyager-sdk) — referensi integrasi inference worker (NPU) ke backend.
+
+
+---
+
+## 9. Endpoint Prototipe Flask Terkini — Log Terpadu, RBAC & Ekspor CSV (`app/web.py`)
+
+Autentikasi prototipe menggunakan sesi Flask + PBKDF2-HMAC-SHA256 + CSRF token (`X-CSRF-Token` / hidden field `csrf`) dengan 4 peran RBAC: `admin`, `satpam`, `hrga`, dan `beacukai`.
+
+### 9.1 `GET /api/logs` *(role: semua peran terautentikasi)*
+Query parameter filter yang didukung:
+- `q`: pencarian parsial pada plat nomor, nama pengemudi/tamu, perusahaan/vendor, tujuan/PIC, nomor dokumen BC, dan nomor segel.
+- `direction`: `IN` atau `OUT`.
+- `visit_category`: `COMPANY_CAR`, `EMPLOYEE`, `CARGO_LOGISTIC`, atau `GUEST` (untuk role `beacukai`, default otomatis `CARGO_LOGISTIC` bila tidak diisi).
+- `status`: `UNCLOSED_IN` (kendaraan masih di dalam area) atau kode keputusan (`AUTO_OPEN`, `NO_MATCH`, `OCR_FAILED`, `LOW_CONFIDENCE`, `MANUAL_OVERRIDE`, `REJECTED`).
+- `bc_doc_type`: `NONE`, `BC 2.3`, `BC 2.5`, `BC 2.7`, `BC 4.0`, `BC 4.1`, `SURAT_JALAN`.
+- `date_from` & `date_to`: rentang tanggal `YYYY-MM-DD`.
+- `limit`: batas baris (default `100`, maksimum `500`).
+
+### 9.2 `GET /api/logs/export.csv` *(role: semua peran terautentikasi)*
+Menghasilkan berkas CSV UTF-8 dengan BOM (`\ufeff`, siap dibuka langsung di Microsoft Excel) sesuai seluruh filter query di atas, dilengkapi sanitasi *CSV formula injection* (`_csv_safe`).
+
+### 9.3 `POST /api/logs/<log_id>/action` *(role: `admin`, `satpam` — `hrga` & `beacukai` ditolak HTTP 403)*
+Payload JSON terstruktur untuk `bypass` (`MANUAL_OVERRIDE`), `reject` (`REJECTED`), atau `update` (lengkapi metadata pada log final):
+```json
+{
+  "action": "bypass",
+  "note": "Dokumen BC 4.0 dan segel sesuai fisik kontainer.",
+  "direction": "IN",
+  "visit_category": "CARGO_LOGISTIC",
+  "driver_or_guest_name": "Hendra Wijaya",
+  "company_or_vendor": "PT Mitra Logistik",
+  "visit_purpose_or_host": "Gudang Bahan Baku",
+  "bc_doc_type": "BC 4.0",
+  "bc_doc_number": "000123-20261127",
+  "seal_number": "SL-889201"
+}
+```
+
+### 9.4 `GET /bookings`, `POST /bookings/save`, `POST /bookings/<id>/status` *(role: `admin`, `hrga`)*
+Manajemen jadwal/izin kendaraan operasional, tamu, dan kargo pada tabel `vehicle_bookings`. Akses dari `satpam` dan `beacukai` ditolak dengan `HTTP 403`.

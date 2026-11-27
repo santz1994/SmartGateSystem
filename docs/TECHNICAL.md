@@ -304,7 +304,8 @@ volumes:
 
 ```dotenv
 # Blueprint produksi. Prototipe Flask cukup: SGS_SECRET_KEY (kunci sesi),
-# SGS_ADMIN_PASSWORD/SGS_SATPAM_PASSWORD (akun seed), SGS_STICKER_SIGNING_KEY.
+# SGS_ADMIN_PASSWORD, SGS_SATPAM_PASSWORD, SGS_HRGA_PASSWORD, SGS_BEACUKAI_PASSWORD,
+# SGS_USE_ONNX=1 (default runner ONNX murni tanpa PyTorch), SGS_STICKER_SIGNING_KEY.
 APP_ENV=production
 TZ=Asia/Jakarta
 DATABASE_URL=postgresql+asyncpg://smartgate:${DB_PASSWORD}@db:5432/smartgate

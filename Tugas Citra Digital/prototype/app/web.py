@@ -1,4 +1,4 @@
-"""Aplikasi web Flask: dashboard satpam, upload foto manual, simulasi CCTV, log.
+"""Aplikasi web Flask: dashboard satpam, HRGA, Bea Cukai, upload foto manual, simulasi CCTV, log.
 
 Sengaja tanpa WebSocket: dashboard melakukan polling ringan ke ``/api/alerts``
 tiap 3 detik. Untuk prototipe ini cukup, dan menghilangkan satu dependensi.
@@ -6,16 +6,20 @@ tiap 3 detik. Untuk prototipe ini cukup, dan menghilangkan satu dependensi.
 
 from __future__ import annotations
 
+import csv
+import io
 import os
 import re
 import secrets
 import sqlite3
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from flask import (
     Flask,
+    Response,
     abort,
     jsonify,
     redirect,
@@ -61,6 +65,7 @@ def _record_login_failure(remote_addr: str) -> None:
 def _clear_login_failures(remote_addr: str) -> None:
     _LOGIN_FAILURES.pop(remote_addr or "local", None)
 
+
 # Run training YOLO — dipantau halaman /training. Pilih run terbaru otomatis.
 def _latest_train_run() -> Path:
     candidates = [
@@ -86,6 +91,7 @@ def _csrf_token() -> str:
         session["csrf"] = secrets.token_hex(16)
     return session["csrf"]
 
+
 def _secret_key() -> str:
     """Kunci sesi: ``SGS_SECRET_KEY`` (produksi) atau file acak persisten (demo)."""
     from_env = os.getenv("SGS_SECRET_KEY", "").strip()
@@ -98,6 +104,45 @@ def _secret_key() -> str:
     value = secrets.token_hex(32)
     path.write_text(value, encoding="utf-8")
     return value
+
+
+def _csv_safe(value: Any) -> str:
+    """Cegah CSV formula injection saat berkas dibuka di Microsoft Excel."""
+    text = "" if value is None else str(value)
+    if text and text[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + text
+    return text
+
+
+def _extract_log_filters(args: Any, role: str | None) -> dict[str, str]:
+    """Ambil & normalisasi parameter filter log dari query string."""
+    visit_category = (args.get("visit_category") or "").strip().upper()
+    # Role Bea Cukai default otomatis terfilter ke CARGO_LOGISTIC bila tidak memilih kategori lain.
+    if role == "beacukai" and not visit_category and "visit_category" not in args:
+        visit_category = "CARGO_LOGISTIC"
+    return {
+        "q": (args.get("q") or "").strip(),
+        "direction": (args.get("direction") or "").strip().upper(),
+        "visit_category": visit_category,
+        "status": (args.get("status") or args.get("decision") or "").strip().upper(),
+        "bc_doc_type": (args.get("bc_doc_type") or "").strip().upper(),
+        "date_from": (args.get("date_from") or "").strip(),
+        "date_to": (args.get("date_to") or "").strip(),
+    }
+
+
+def _query_logs_from_filters(filters: dict[str, str], limit: int = 200) -> list[Any]:
+    return db.list_gate_logs(
+        limit=limit,
+        q=filters["q"] or None,
+        direction=filters["direction"] or None,
+        visit_category=filters["visit_category"] or None,
+        status=filters["status"] or None,
+        bc_doc_type=filters["bc_doc_type"] or None,
+        date_from=filters["date_from"] or None,
+        date_to=filters["date_to"] or None,
+    )
+
 
 def create_app() -> Flask:
     config.ensure_dirs()
@@ -147,7 +192,11 @@ def create_app() -> Flask:
             return render_template("login.html", error=str(exc)), 401
         _clear_login_failures(client_ip)
         target = request.args.get("next") or ""
-        return redirect(target if target.startswith("/") and not target.startswith("//") else url_for("dashboard"))
+        if target.startswith("/") and not target.startswith("//"):
+            return redirect(target)
+        if auth.current_role() == "beacukai":
+            return redirect(url_for("logs_page"))
+        return redirect(url_for("dashboard"))
 
     @app.post("/logout")
     def logout() -> Any:
@@ -178,40 +227,61 @@ def create_app() -> Flask:
 
     @app.context_processor
     def _inject_auth() -> dict[str, Any]:
-        return {"auth": auth, "csrf_token": _csrf_token(), "app_version": config.APP_VERSION}
+        return {
+            "auth": auth,
+            "csrf_token": _csrf_token(),
+            "app_version": config.APP_VERSION,
+            "role_labels": auth.ROLE_LABELS,
+            "visit_category_labels": db.VISIT_CATEGORY_LABELS,
+            "format_dwell": db.format_dwell,
+        }
 
     # --- Halaman --------------------------------------------------------------
 
     @app.get("/")
     @auth.login_required
-    def dashboard() -> str:
+    def dashboard() -> Any:
+        role = auth.current_role()
+        recent_logs = (
+            db.list_gate_logs(limit=12, visit_category="CARGO_LOGISTIC")
+            if role == "beacukai"
+            else db.list_gate_logs(limit=12)
+        )
         return render_template(
             "dashboard.html",
             stats=db.stats(),
-            pending=service.pending_logs(limit=8),
-            logs=db.list_gate_logs(limit=12),
+            pending=service.pending_logs(limit=8) if role in ("admin", "satpam") else [],
+            logs=recent_logs,
             labels=fusion.DECISION_LABEL,
             alerts=fusion.DECISION_ALERT,
             backend=ocr.active_backend(),
             decoders=sticker.available_decoders(),
             vehicles=_vehicles(),
+            can_operate=role in ("admin", "satpam"),
+            can_manage_bookings=role in ("admin", "hrga"),
         )
 
     @app.get("/upload")
     @auth.login_required
+    @auth.roles_required("admin", "satpam")
     def upload_page() -> str:
         return render_template("upload.html", backend=ocr.active_backend())
 
     @app.get("/logs")
     @auth.login_required
     def logs_page() -> str:
-        decision = request.args.get("decision") or None
+        role = auth.current_role()
+        filters = _extract_log_filters(request.args, role)
+        rows = _query_logs_from_filters(filters, limit=200)
         return render_template(
             "logs.html",
-            logs=db.list_gate_logs(limit=100, decision=decision),
+            logs=rows,
             labels=fusion.DECISION_LABEL,
             alerts=fusion.DECISION_ALERT,
-            selected=decision or "",
+            filters=filters,
+            visit_categories=db.VISIT_CATEGORIES,
+            bc_doc_types=db.BC_DOC_TYPES,
+            backend=ocr.active_backend(),
         )
 
     @app.get("/logs/<int:log_id>")
@@ -220,28 +290,40 @@ def create_app() -> Flask:
         row = db.get_gate_log(log_id)
         if row is None:
             abort(404)
+        log_dict = dict(row)
+        paired_row = db.get_gate_log(log_dict["paired_log_id"]) if log_dict.get("paired_log_id") else None
+        role = auth.current_role()
         return render_template(
             "log_detail.html",
-            log=dict(row),
+            log=log_dict,
+            paired_log=dict(paired_row) if paired_row is not None else None,
+            dwell_label=db.format_dwell(log_dict.get("dwell_minutes")),
             events=[dict(e) for e in db.list_detection_events(row["session_id"])],
             labels=fusion.DECISION_LABEL,
             alerts=fusion.DECISION_ALERT,
             pending=row["decision"] in fusion.PENDING_DECISIONS,
+            can_act=role in ("admin", "satpam"),
+            visit_categories=db.VISIT_CATEGORIES,
+            bc_doc_types=db.BC_DOC_TYPES,
             stages=_stage_files(row["session_id"]),
+            backend=ocr.active_backend(),
         )
 
     @app.get("/camera")
     @auth.login_required
+    @auth.roles_required("admin", "satpam")
     def camera_page() -> str:
         return render_template("camera.html", backend=ocr.active_backend())
 
     @app.get("/training")
     @auth.login_required
+    @auth.admin_required
     def training_page() -> str:
         return render_template("training.html", status=training_status(), backend=ocr.active_backend())
 
     @app.get("/training/plot/<name>")
     @auth.login_required
+    @auth.admin_required
     def training_plot(name: str) -> Any:
         if name not in TRAIN_PLOTS:
             abort(404)
@@ -250,13 +332,57 @@ def create_app() -> Flask:
             abort(404)
         return send_file(path)
 
+    # --- Jadwal / Izin Kendaraan (HRGA & Admin) -------------------------------
+
+    @app.get("/bookings")
+    @auth.login_required
+    @auth.roles_required("admin", "hrga")
+    def bookings_page() -> str:
+        status_filter = (request.args.get("status") or "").strip().upper() or None
+        return _bookings_page(status_filter=status_filter)
+
+    @app.post("/bookings/save")
+    @auth.login_required
+    @auth.roles_required("admin", "hrga")
+    def bookings_save() -> Any:
+        raw_plate = (request.form.get("plate_number") or "").strip().upper()
+        fields = {
+            "plate_number": raw_plate,
+            "visit_category": (request.form.get("visit_category") or "GUEST").strip().upper(),
+            "driver_or_guest_name": (request.form.get("driver_or_guest_name") or "").strip(),
+            "company_or_vendor": (request.form.get("company_or_vendor") or "").strip(),
+            "visit_purpose_or_host": (request.form.get("visit_purpose_or_host") or "").strip(),
+            "bc_doc_type": (request.form.get("bc_doc_type") or "NONE").strip().upper(),
+            "bc_doc_number": (request.form.get("bc_doc_number") or "").strip(),
+            "valid_from": _normalize_dt_input(request.form.get("valid_from") or ""),
+            "valid_until": _normalize_dt_input(request.form.get("valid_until") or ""),
+            "status": "ACTIVE",
+            "created_by": auth.current_user() or "",
+        }
+        error = _validate_booking(fields)
+        if error:
+            return _bookings_page(form_data=fields, error=error), 400
+        db.insert_vehicle_booking(**fields)
+        return redirect(url_for("bookings_page"))
+
+    @app.post("/bookings/<int:booking_id>/status")
+    @auth.login_required
+    @auth.roles_required("admin", "hrga")
+    def bookings_status(booking_id: int) -> Any:
+        new_status = (request.form.get("status") or "").strip().upper()
+        if new_status not in db.BOOKING_STATUSES:
+            abort(400)
+        db.update_vehicle_booking_status(booking_id, new_status)
+        return redirect(url_for("bookings_page"))
+
     # --- Manajemen kendaraan ---------------------------------------------------
 
     @app.get("/vehicles")
     @auth.login_required
+    @auth.roles_required("admin", "satpam", "hrga")
     def vehicles_page() -> str:
         edit_id = request.args.get("edit", type=int)
-        row = db.get_vehicle(edit_id) if edit_id else None
+        row = db.get_vehicle(edit_id) if (edit_id and auth.current_role() == "admin") else None
         return _vehicles_page(edit=dict(row) if row else None)
 
     @app.post("/vehicles/save")
@@ -303,8 +429,9 @@ def create_app() -> Flask:
 
     @app.post("/api/evaluate")
     @auth.login_required
+    @auth.roles_required("admin", "satpam")
     def api_evaluate() -> Any:
-        """Foto manual: 1..N berkas diunggah, diproses sebagai satu sesi."""
+        """Foto manual / kamera: 1..N berkas diunggah, diproses sebagai satu sesi."""
         files = [f for f in request.files.getlist("images") if f and f.filename]
         if not files:
             return jsonify({"error": "Tidak ada berkas yang diunggah"}), 400
@@ -321,6 +448,10 @@ def create_app() -> Flask:
         def enabled(name: str, default: str = "1") -> bool:
             return request.args.get(name, default).strip().lower() not in {"0", "false", "off"}
 
+        direction = (request.args.get("direction") or request.form.get("direction") or "IN").strip().upper()
+        if direction not in db.DIRECTIONS:
+            direction = "IN"
+
         # Fast hanya untuk auto scan; unggahan manual & scan simpan-log selalu penuh.
         fast = enabled("fast", "0")
         result = service.evaluate(
@@ -330,35 +461,131 @@ def create_app() -> Flask:
             plate_enabled=enabled("plate"),
             sticker_enabled=enabled("sticker"),
             fast=fast,
+            direction=direction,
         )
-        return jsonify(result.as_dict())
+        return jsonify({**result.as_dict(), "direction": direction})
 
     @app.post("/api/simulate")
     @auth.login_required
+    @auth.roles_required("admin", "satpam")
     def api_simulate() -> Any:
         """Simulasi sepasang frame CCTV 1 + CCTV 2."""
         payload = request.get_json(silent=True) or {}
         plate = (payload.get("plate") or "B 1234 XYZ").strip()
         sticker_code = (payload.get("sticker") or "").strip() or None
         hard = bool(payload.get("hard"))
+        direction = str(payload.get("direction") or "IN").strip().upper()
+        if direction not in db.DIRECTIONS:
+            direction = "IN"
         vehicle = (payload.get("vehicle") or "car").strip().lower()
         if vehicle not in simulate.VEHICLES:
             return jsonify({"error": f"Kelas kendaraan tidak dikenal: {vehicle}"}), 400
         frames = simulate.cctv_pair(
             plate, sticker_code, seed=int(payload.get("seed") or 0), hard=hard, vehicle=vehicle
         )
-        result = service.evaluate(frames, source="cctv")
-        return jsonify(result.as_dict())
+        result = service.evaluate(frames, source="cctv", direction=direction)
+        return jsonify({**result.as_dict(), "direction": direction})
+
+    @app.get("/api/logs")
+    @auth.login_required
+    def api_list_logs() -> Any:
+        role = auth.current_role()
+        filters = _extract_log_filters(request.args, role)
+        limit = min(max(request.args.get("limit", default=100, type=int) or 100, 1), 500)
+        rows = _query_logs_from_filters(filters, limit=limit)
+        return jsonify({"filters": filters, "count": len(rows), "logs": [dict(r) for r in rows]})
+
+    @app.get("/api/logs/export.csv")
+    @auth.login_required
+    def api_export_logs_csv() -> Any:
+        """Ekspor laporan audit CSV UTF-8 dengan BOM (siap dibuka langsung di Excel)."""
+        role = auth.current_role()
+        filters = _extract_log_filters(request.args, role)
+        rows = _query_logs_from_filters(filters, limit=5000)
+
+        buf = io.StringIO()
+        buf.write("\ufeff")  # UTF-8 BOM untuk Microsoft Excel
+        writer = csv.writer(buf)
+        writer.writerow(
+            [
+                "ID",
+                "Waktu",
+                "Arah",
+                "Kategori",
+                "Plat Nomor",
+                "Stiker",
+                "Keputusan",
+                "Skor Fusi",
+                "Pasangan Log ID",
+                "Durasi (Menit)",
+                "Nama Pengemudi / Tamu",
+                "Perusahaan / Ekspedisi",
+                "Tujuan / PIC",
+                "Jenis Dokumen BC",
+                "No. Dokumen BC / Surat Jalan",
+                "No. Segel",
+                "Petugas Override",
+                "Catatan Audit",
+                "Waktu Override",
+            ]
+        )
+        for row in rows:
+            writer.writerow(
+                [
+                    _csv_safe(row["id"]),
+                    _csv_safe(row["created_at"]),
+                    _csv_safe(row["direction"]),
+                    _csv_safe(row["visit_category"]),
+                    _csv_safe(row["plate_text"] or ""),
+                    _csv_safe(row["sticker_code"] or ""),
+                    _csv_safe(row["decision"]),
+                    f"{float(row['fused_score'] or 0.0):.2f}",
+                    _csv_safe(row["paired_log_id"] if row["paired_log_id"] is not None else ""),
+                    _csv_safe(row["dwell_minutes"] if row["dwell_minutes"] is not None else ""),
+                    _csv_safe(row["driver_or_guest_name"]),
+                    _csv_safe(row["company_or_vendor"]),
+                    _csv_safe(row["visit_purpose_or_host"]),
+                    _csv_safe(row["bc_doc_type"]),
+                    _csv_safe(row["bc_doc_number"]),
+                    _csv_safe(row["seal_number"]),
+                    _csv_safe(row["override_by"] or ""),
+                    _csv_safe(row["override_note"] or ""),
+                    _csv_safe(row["override_at"] or ""),
+                ]
+            )
+
+        stamp = datetime.now().strftime("%Y%m%d_%H%M")
+        return Response(
+            buf.getvalue(),
+            mimetype="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="smartgate_logs_{stamp}.csv"',
+                "Cache-Control": "no-store",
+            },
+        )
 
     @app.post("/api/logs/<int:log_id>/action")
     @auth.login_required
+    @auth.roles_required("admin", "satpam")
     def api_guard_action(log_id: int) -> Any:
         payload = request.get_json(silent=True) or {}
+        meta_keys = (
+            "direction",
+            "visit_category",
+            "driver_or_guest_name",
+            "company_or_vendor",
+            "visit_purpose_or_host",
+            "bc_doc_type",
+            "bc_doc_number",
+            "seal_number",
+        )
+        metadata = {k: payload[k] for k in meta_keys if k in payload}
         ok, message = service.guard_action(
             log_id,
             str(payload.get("action", "")),
             auth.current_user() or "",  # identitas dari sesi server, bukan body (C2)
             str(payload.get("note") or ""),
+            metadata=metadata or None,
         )
         return jsonify({"ok": ok, "message": message}), (200 if ok else 400)
 
@@ -366,9 +593,10 @@ def create_app() -> Flask:
     @auth.login_required
     def api_alerts() -> Any:
         """Polling dashboard: log terbaru + daftar yang menunggu tindakan."""
+        role = auth.current_role()
         return jsonify(
             {
-                "pending": service.pending_logs(limit=10),
+                "pending": service.pending_logs(limit=10) if role in ("admin", "satpam") else [],
                 "stats": db.stats(),
                 "latest_id": (db.list_gate_logs(limit=1) or [{"id": 0}])[0]["id"],
             }
@@ -376,6 +604,7 @@ def create_app() -> Flask:
 
     @app.get("/api/settings")
     @auth.login_required
+    @auth.admin_required
     def api_get_settings() -> Any:
         return jsonify(
             {
@@ -447,6 +676,50 @@ def create_app() -> Flask:
     return app
 
 
+def _normalize_dt_input(raw: str) -> str:
+    """Ubah input HTML datetime-local ('YYYY-MM-DDTHH:MM') menjadi 'YYYY-MM-DD HH:MM:00'."""
+    val = raw.strip().replace("T", " ")
+    if len(val) == 10:
+        return f"{val} 00:00:00"
+    if len(val) == 16:
+        return f"{val}:00"
+    return val
+
+
+def _validate_booking(fields: dict[str, Any]) -> str | None:
+    plate = fields.get("plate_number") or ""
+    if not plate:
+        return "Plat nomor wajib diisi."
+    if len(plate) > 16 or not _PLATE_INPUT_RE.fullmatch(plate):
+        return "Plat nomor maksimal 16 karakter dan hanya boleh berisi huruf, angka, atau spasi."
+    _, err = service.validate_log_metadata(fields)
+    if err:
+        return err
+    if not fields.get("valid_from") or not fields.get("valid_until"):
+        return "Waktu mulai dan berakhir wajib diisi."
+    if fields["valid_from"] > fields["valid_until"]:
+        return "Waktu berakhir harus lebih besar dari waktu mulai."
+    return None
+
+
+def _bookings_page(
+    form_data: dict[str, Any] | None = None,
+    error: str | None = None,
+    status_filter: str | None = None,
+) -> str:
+    return render_template(
+        "bookings.html",
+        rows=db.list_vehicle_bookings(status=status_filter, limit=200),
+        form_data=form_data or {},
+        error=error,
+        status_filter=status_filter or "",
+        visit_categories=db.VISIT_CATEGORIES,
+        bc_doc_types=db.BC_DOC_TYPES,
+        booking_statuses=db.BOOKING_STATUSES,
+        backend=ocr.active_backend(),
+    )
+
+
 def _vehicles() -> list[dict[str, Any]]:
     with db.session() as conn:
         rows = conn.execute(
@@ -455,10 +728,9 @@ def _vehicles() -> list[dict[str, Any]]:
         ).fetchall()
     return [dict(row) for row in rows]
 
+
 def training_status() -> dict[str, Any]:
     """Status training YOLO dari results.csv run — untuk halaman /training."""
-    import csv
-
     epochs: list[dict[str, str]] = []
     csv_path = TRAIN_RUN_DIR / "results.csv"
     if csv_path.is_file():
@@ -484,6 +756,7 @@ def training_status() -> dict[str, Any]:
         "plate_backend": detect_yolo.status(),
     }
 
+
 def _validate_vehicle(fields: dict[str, Any]) -> str | None:
     plate = fields.get("plate_number") or ""
     if not plate:
@@ -503,6 +776,7 @@ def _validate_vehicle(fields: dict[str, Any]) -> str | None:
         return "Format 'berlaku s.d.' harus YYYY-MM-DD."
     return None
 
+
 def _vehicles_page(edit: dict[str, Any] | None = None, error: str | None = None) -> str:
     return render_template(
         "vehicles.html",
@@ -511,6 +785,7 @@ def _vehicles_page(edit: dict[str, Any] | None = None, error: str | None = None)
         error=error,
         vehicle_types=[(key, vehicles.label(key)) for key in VEHICLE_TYPES],
         owner_types=OWNER_TYPES,
+        can_edit=auth.current_role() == "admin",
         backend=ocr.active_backend(),
     )
 

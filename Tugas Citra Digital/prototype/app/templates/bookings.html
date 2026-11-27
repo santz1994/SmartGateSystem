@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Jadwal &amp; Izin Kendaraan — Smart Gate{% endblock %}
+
+{% block content %}
+<section class="grid">
+  <div class="card">
+    <h2>Tambah Jadwal / Izin Kendaraan (HRGA)</h2>
+    <p class="muted small">Saat kendaraan dengan plat ini dipindai di gerbang dalam rentang waktu aktif, metadata kategori, tujuan, dan dokumen BC otomatis terisi ke log.</p>
+    {% if error %}<p class="badge RED">{{ error }}</p>{% endif %}
+    <form method="post" action="{{ url_for('bookings_save') }}">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+      <label>Plat nomor (wajib)
+        <input name="plate_number" required maxlength="16" placeholder="B 9012 QWE"
+               value="{{ form_data.get('plate_number', '') }}">
+      </label>
+      <label>Kategori kunjungan
+        <select name="visit_category" id="booking-category">
+          {% for cat in visit_categories %}
+            <option value="{{ cat }}" {% if form_data.get('visit_category', 'GUEST') == cat %}selected{% endif %}>
+              {{ visit_category_labels.get(cat, cat) }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Nama pengemudi / tamu
+        <input name="driver_or_guest_name" maxlength="120" placeholder="Nama lengkap"
+               value="{{ form_data.get('driver_or_guest_name', '') }}">
+      </label>
+      <label>Perusahaan / ekspedisi / vendor
+        <input name="company_or_vendor" maxlength="120" placeholder="mis. PT Mitra Logistik"
+               value="{{ form_data.get('company_or_vendor', '') }}">
+      </label>
+      <label>Tujuan / PIC HRGA / Departemen
+        <input name="visit_purpose_or_host" maxlength="200" placeholder="mis. Gudang Bahan Baku / Pak Andi"
+               value="{{ form_data.get('visit_purpose_or_host', '') }}">
+      </label>
+      <label>Jenis dokumen pabean / jalan
+        <select name="bc_doc_type">
+          {% for doc in bc_doc_types %}
+            <option value="{{ doc }}" {% if form_data.get('bc_doc_type', 'NONE') == doc %}selected{% endif %}>{{ doc }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Nomor dokumen BC / Surat Jalan
+        <input name="bc_doc_number" maxlength="64" placeholder="mis. 000123-20261127"
+               value="{{ form_data.get('bc_doc_number', '') }}">
+      </label>
+      <label>Berlaku mulai
+        <input type="datetime-local" name="valid_from" required value="{{ form_data.get('valid_from', '') }}">
+      </label>
+      <label>Berlaku hingga
+        <input type="datetime-local" name="valid_until" required value="{{ form_data.get('valid_until', '') }}">
+      </label>
+      <button type="submit">Simpan Jadwal / Izin</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Daftar Jadwal &amp; Izin ({{ rows|length }})</h2>
+    <form method="get" class="filter-bar">
+      <label>Status
+        <select name="status">
+          <option value="">Semua</option>
+          {% for st in booking_statuses %}
+            <option value="{{ st }}" {% if status_filter == st %}selected{% endif %}>{{ st }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit">Filter</button>
+    </form>
+    <div class="table-scroll">
+    <table class="data">
+      <thead>
+        <tr><th>#</th><th>Plat</th><th>Kategori</th><th>Pengemudi / Vendor</th><th>Tujuan / PIC</th><th>Dokumen BC</th><th>Berlaku</th><th>Status</th><th>Aksi</th></tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.id }}</td>
+          <td><code>{{ row.plate_number }}</code></td>
+          <td><span class="badge cat-{{ row.visit_category }}">{{ visit_category_labels.get(row.visit_category, row.visit_category) }}</span></td>
+          <td class="small">{{ row.driver_or_guest_name or '—' }}<div class="muted">{{ row.company_or_vendor }}</div></td>
+          <td class="small">{{ row.visit_purpose_or_host or '—' }}</td>
+          <td class="small">{{ row.bc_doc_type if row.bc_doc_type != 'NONE' else '—' }}{% if row.bc_doc_number %} <code>{{ row.bc_doc_number }}</code>{% endif %}</td>
+          <td class="muted small">{{ row.valid_from }}<br>s.d. {{ row.valid_until }}</td>
+          <td><span class="badge {{ 'GREEN' if row.status == 'ACTIVE' else ('AMBER' if row.status == 'USED' else 'RED') }}">{{ row.status }}</span></td>
+          <td>
+            {% if row.status == 'ACTIVE' %}
+            <form method="post" action="{{ url_for('bookings_status', booking_id=row.id) }}" class="inline-form">
+              <input type="hidden" name="csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="status" value="CANCELLED">
+              <button class="small bad" type="submit" data-confirm="Batalkan jadwal {{ row.plate_number|e }}?">Batalkan</button>
+            </form>
+            {% else %}
+            <span class="muted small">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="muted">Belum ada jadwal kendaraan.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -18,6 +18,13 @@ from flask import abort, redirect, request, session, url_for
 from . import db
 
 _ITERATIONS = 200_000
+ROLE_CHOICES = ("admin", "satpam", "hrga", "beacukai")
+ROLE_LABELS = {
+    "admin": "Admin",
+    "satpam": "Satpam",
+    "hrga": "HRGA",
+    "beacukai": "Bea Cukai",
+}
 
 def hash_password(password: str) -> str:
     salt = secrets.token_hex(16)
@@ -67,11 +74,23 @@ def login_required(view: Callable[..., Any]) -> Callable[..., Any]:
 
     return wrapper
 
-def admin_required(view: Callable[..., Any]) -> Callable[..., Any]:
-    @wraps(view)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        if current_role() != "admin":
-            abort(403)
-        return view(*args, **kwargs)
+def roles_required(*allowed_roles: str) -> Callable[..., Any]:
+    """Batasi endpoint ke daftar role tertentu (RBAC). Mengembalikan 403 bila ditolak."""
+    allowed = frozenset(allowed_roles)
 
-    return wrapper
+    def decorator(view: Callable[..., Any]) -> Callable[..., Any]:
+        @wraps(view)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            if current_role() not in allowed:
+                if request.path.startswith("/api/"):
+                    return {"error": "FORBIDDEN", "message": "Akses ditolak untuk peran Anda"}, 403
+                abort(403)
+            return view(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def admin_required(view: Callable[..., Any]) -> Callable[..., Any]:
+    return roles_required("admin")(view)

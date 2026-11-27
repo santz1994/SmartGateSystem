@@ -78,6 +78,40 @@ async function postJSON(url, body) {
   return { ok: res.ok, data: await res.json() };
 }
 
+/* --- Pemilih arah gerbang cepat (IN / OUT) --- */
+document.querySelectorAll('button.dir-btn[data-dir-target]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const targetId = button.dataset.dirTarget;
+    const input = document.getElementById(targetId);
+    if (!input) return;
+    input.value = button.dataset.dir || 'IN';
+    document
+      .querySelectorAll(`button.dir-btn[data-dir-target="${targetId}"]`)
+      .forEach((b) => b.classList.toggle('active', b === button));
+  });
+});
+
+/* --- Panel kategori kunjungan dinamis (log_detail.html) --- */
+const logCatInput = $('#log-category');
+function syncCategoryPanels(category) {
+  document.querySelectorAll('.cat-panel[data-cat-panel]').forEach((panel) => {
+    const cats = (panel.dataset.catPanel || '').split(/\s+/);
+    panel.hidden = !cats.includes(category);
+  });
+  document.querySelectorAll('button.cat-btn[data-cat]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.cat === category);
+  });
+}
+if (logCatInput) {
+  syncCategoryPanels(logCatInput.value || 'GUEST');
+  document.querySelectorAll('button.cat-btn[data-cat]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      logCatInput.value = btn.dataset.cat;
+      syncCategoryPanels(btn.dataset.cat);
+    });
+  });
+}
+
 /* --- Simulasi CCTV --- */
 const simButton = $('#sim-run');
 if (simButton) {
@@ -89,6 +123,7 @@ if (simButton) {
         plate: $('#sim-plate').value,
         sticker: $('#sim-sticker').value,
         hard: $('#sim-hard').checked,
+        direction: $('#sim-direction') ? $('#sim-direction').value : 'IN',
       });
       if (!ok) throw new Error(data.error || 'Gagal');
       window.location.href = `/logs/${data.log_id}`;
@@ -135,20 +170,54 @@ document.querySelectorAll('button[data-confirm]').forEach((button) => {
   });
 });
 
-/* --- Tindakan satpam --- */
+/* --- Tindakan satpam & metadata kunjungan terstruktur --- */
+function collectVisitPayload() {
+  const direction = $('#log-direction') ? $('#log-direction').value : 'IN';
+  const visit_category = $('#log-category') ? $('#log-category').value : 'GUEST';
+  const base = {
+    direction,
+    visit_category,
+    driver_or_guest_name: '',
+    company_or_vendor: '',
+    visit_purpose_or_host: '',
+    bc_doc_type: 'NONE',
+    bc_doc_number: '',
+    seal_number: '',
+  };
+  if (visit_category === 'GUEST') {
+    base.driver_or_guest_name = ($('#f-guest-name')?.value || '').trim();
+    base.company_or_vendor = ($('#f-guest-company')?.value || '').trim();
+    base.visit_purpose_or_host = ($('#f-guest-host')?.value || '').trim();
+  } else if (visit_category === 'CARGO_LOGISTIC') {
+    base.company_or_vendor = ($('#f-cargo-company')?.value || '').trim();
+    base.driver_or_guest_name = ($('#f-cargo-driver')?.value || '').trim();
+    base.visit_purpose_or_host = ($('#f-cargo-purpose')?.value || '').trim();
+    base.bc_doc_type = $('#f-bc-type')?.value || 'NONE';
+    base.bc_doc_number = ($('#f-bc-number')?.value || '').trim();
+    base.seal_number = ($('#f-seal-number')?.value || '').trim();
+  } else {
+    base.driver_or_guest_name = ($('#f-emp-driver')?.value || '').trim();
+    base.company_or_vendor = ($('#f-emp-company')?.value || '').trim();
+    base.visit_purpose_or_host = ($('#f-emp-purpose')?.value || '').trim();
+  }
+  return base;
+}
+
 document.querySelectorAll('button[data-action]').forEach((button) => {
   button.addEventListener('click', async () => {
-    const note = $('#guard-note').value.trim();
-    if (!note) {
+    const action = button.dataset.action;
+    const note = ($('#guard-note')?.value || '').trim();
+    if (action !== 'update' && !note) {
       $('#guard-msg').textContent = 'Catatan wajib diisi untuk audit.';
       return;
     }
     const { ok, data } = await postJSON(`/api/logs/${button.dataset.log}/action`, {
-      action: button.dataset.action,
+      action,
       note,
+      ...collectVisitPayload(),
     });
-    $('#guard-msg').textContent = data.message;
-    if (ok) setTimeout(() => window.location.reload(), 700);
+    $('#guard-msg').textContent = data.message || data.error || '';
+    if (ok) setTimeout(() => window.location.reload(), 650);
   });
 });
 
@@ -253,6 +322,7 @@ if (camVideo) {
         plate: plateEnabled ? '1' : '0',
         sticker: persist && stickerEnabled ? '1' : '0',
         fast: persist ? '0' : '1',
+        direction: $('#cam-direction') ? $('#cam-direction').value : 'IN',
       });
       const res = await fetch(`/api/evaluate?${params.toString()}`, {
         method: 'POST',
@@ -403,7 +473,7 @@ if (document.querySelector('meta[name="sgs-poll"]')) {
   const refreshPanels = async () => {
     const res = await fetch('/');
     const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
-    for (const sel of ['#pending-list', '#stats-table', '#log-table-body']) {
+    for (const sel of ['#kpi-strip', '#pending-list', '#stats-table', '#log-table-body']) {
       const fresh = doc.querySelector(sel);
       const current = document.querySelector(sel);
       if (fresh && current) current.replaceChildren(...fresh.childNodes);

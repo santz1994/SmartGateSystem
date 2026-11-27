@@ -334,3 +334,52 @@ DELETE FROM gate_logs        WHERE created_at  < now() - INTERVAL '365 days';
 
 - Subekti, I., Hariyono, R. C. S., dan Sorikhi. (2025). *Pengenalan Plat Nomor Kendaraan Menggunakan Algoritma CNN Berbasis Tensorflow*. Remik Vol. 9 No. 3. DOI [10.33395/remik.v9i3.15169](https://doi.org/10.33395/remik.v9i3.15169). [PDF](artc/15169-Article%20Text-24310-1-10-20250811.pdf)
 - Harani, N. H., Prianto, C., dan Hasanah, M. (2019). *Deteksi Objek dan Pengenalan Karakter Plat Nomor Kendaraan Indonesia Menggunakan Metode CNN Berbasis Python*. Jurnal Teknik Informatika Vol. 11 No. 3. [PDF](artc/658-Article%20Text-963-1-10-20200213.pdf)
+
+
+---
+
+## 7. Implementasi Prototipe SQLite Terkini — Log Terpadu & Kepatuhan (`app/db.py`)
+
+Untuk mendukung operasional Satpam, HRGA, dan pengawasan Bea Cukai pada prototipe (`Tugas Citra Digital/prototype/app/db.py`), tabel `gate_logs` dan `users` diperluas dengan migrasi otomatis idempoten (`_migrate()`) tanpa memutus database SQLite lama:
+
+### 7.1 Kolom Baru pada `gate_logs`
+| Kolom | Tipe & Constraint | Keterangan |
+| :--- | :--- | :--- |
+| `direction` | `TEXT NOT NULL DEFAULT 'IN'` (`'IN'`, `'OUT'`) | Arah pergerakan kendaraan di gerbang. |
+| `visit_category` | `TEXT NOT NULL DEFAULT 'GUEST'` (`'COMPANY_CAR'`, `'EMPLOYEE'`, `'CARGO_LOGISTIC'`, `'GUEST'`) | Klasifikasi operasional kendaraan. |
+| `paired_log_id` | `INTEGER NULL REFERENCES gate_logs(id)` | Tautan dua arah antara log `IN` dan log `OUT` pada plat nomor yang sama. |
+| `dwell_minutes` | `INTEGER NULL` | Durasi kunjungan otomatis (menit) dari selisih waktu `IN` ke `OUT`. |
+| `driver_or_guest_name` | `TEXT NOT NULL DEFAULT ''` | Nama pengemudi / tamu / sopir. |
+| `company_or_vendor` | `TEXT NOT NULL DEFAULT ''` | Nama perusahaan / instansi / ekspedisi. |
+| `visit_purpose_or_host` | `TEXT NOT NULL DEFAULT ''` | Tujuan kunjungan / PIC HRGA / departemen / gudang. |
+| `bc_doc_type` | `TEXT NOT NULL DEFAULT 'NONE'` (`'NONE'`, `'BC 2.3'`, `'BC 2.5'`, `'BC 2.7'`, `'BC 4.0'`, `'BC 4.1'`, `'SURAT_JALAN'`) | Jenis dokumen kepabeanan atau surat jalan. |
+| `bc_doc_number` | `TEXT NOT NULL DEFAULT ''` | Nomor dokumen pabean / nomor aju / nomor surat jalan. |
+| `seal_number` | `TEXT NOT NULL DEFAULT ''` | Nomor segel kontainer/box (*seal*). |
+
+**Indeks tambahan:**
+- `idx_gate_logs_dir_cat_created ON gate_logs(direction, visit_category, created_at DESC)` — mempercepat filter HRGA & Bea Cukai.
+- `idx_gate_logs_bc_doc ON gate_logs(bc_doc_number)` — mempercepat pencarian berdasarkan nomor dokumen pabean.
+
+### 7.2 Tabel `vehicle_bookings` (Jadwal & Izin HRGA)
+```sql
+CREATE TABLE IF NOT EXISTS vehicle_bookings (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    plate_number           TEXT NOT NULL,
+    visit_category         TEXT NOT NULL DEFAULT 'GUEST',
+    driver_or_guest_name   TEXT NOT NULL DEFAULT '',
+    company_or_vendor      TEXT NOT NULL DEFAULT '',
+    visit_purpose_or_host  TEXT NOT NULL DEFAULT '',
+    bc_doc_type            TEXT NOT NULL DEFAULT 'NONE',
+    bc_doc_number          TEXT NOT NULL DEFAULT '',
+    valid_from             TEXT NOT NULL,
+    valid_until            TEXT NOT NULL,
+    status                 TEXT NOT NULL DEFAULT 'ACTIVE'
+                           CHECK (status IN ('ACTIVE', 'USED', 'EXPIRED', 'CANCELLED')),
+    created_by             TEXT NOT NULL DEFAULT '',
+    created_at             TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_vehicle_bookings_plate_status ON vehicle_bookings(plate_number, status);
+```
+
+### 7.3 Mekanisme Pairing `IN` ↔ `OUT`
+Ketika log baru disimpan dengan `direction='OUT'` (atau log diperbarui menjadi `direction='OUT'`), fungsi `_pair_exit_in_tx()` mencari log `direction='IN'` terbaru dengan `paired_log_id IS NULL` dan nomor plat (tanpa spasi, *case-insensitive*) yang cocok, menghubungkan kedua baris secara timbal balik (`paired_log_id`), serta menghitung `dwell_minutes = max(0, round((t_out - t_in) / 60))`.

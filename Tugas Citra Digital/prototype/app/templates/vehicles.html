@@ -3,6 +3,7 @@
 
 {% block content %}
 <section class="grid">
+  {% if can_edit %}
   <div class="card">
     <h2>{{ 'Ubah Data Kendaraan' if edit and edit.id else 'Tambah Kendaraan' }}</h2>
     {% if error %}<p class="badge RED">{{ error }}</p>{% endif %}
@@ -41,6 +42,7 @@
       {% if edit and edit.id %}<a class="btn" href="{{ url_for('vehicles_page') }}">Batal</a>{% endif %}
     </form>
   </div>
+  {% endif %}
 
   <div class="card">
     <h2>Daftar Kendaraan ({{ rows|length }})</h2>
@@ -61,11 +63,15 @@
           <td class="muted small">{{ row.valid_until or '—' }}</td>
           <td><span class="badge {{ 'GREEN' if row.is_active else 'RED' }}">{{ 'Aktif' if row.is_active else 'Nonaktif' }}</span></td>
           <td>
+            {% if can_edit %}
             <a class="btn small" href="{{ url_for('vehicles_page', edit=row.id) }}">Ubah</a>
-            <form method="post" action="{{ url_for('vehicles_delete', vehicle_id=row.id) }}" style="display:inline">
+            <form method="post" action="{{ url_for('vehicles_delete', vehicle_id=row.id) }}" class="inline-form">
               <input type="hidden" name="csrf" value="{{ csrf_token }}">
               <button class="small" type="submit" data-confirm="Hapus kendaraan {{ row.plate_number|e }}?">Hapus</button>
             </form>
+            {% else %}
+            <span class="muted small">Read-only</span>
+            {% endif %}
           </td>
         </tr>
         {% else %}

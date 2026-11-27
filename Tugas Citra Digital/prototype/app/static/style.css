@@ -119,3 +119,89 @@ table.kv td:first-child { color: var(--muted); width: 45%; }
 .cam-stage { position: relative; display: inline-block; max-width: 100%; }
 .cam-stage video { display: block; max-width: 100%; }
 #cam-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+/* --- Log Terpadu, RBAC, KPI & Form Dinamis --- */
+.inline-form { display: inline; }
+.userbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.card-head h2 { margin: 0; }
+.mt { margin-top: 18px; }
+.badge-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; }
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.kpi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  text-decoration: none;
+  color: var(--text);
+}
+.kpi-card:hover { border-color: var(--accent); }
+.kpi-label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.kpi-value { font-size: 28px; line-height: 1.1; }
+.kpi-value.accent { color: var(--accent); }
+
+.dir-switch, .cat-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0 12px;
+}
+.dir-btn, .cat-btn {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  padding: 7px 12px;
+  min-height: 38px;
+  font-size: 13px;
+}
+.dir-btn.active, .cat-btn.active {
+  background: var(--accent);
+  color: #06121f;
+  border-color: var(--accent);
+}
+
+.cat-panel {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .02);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.cat-panel[hidden] { display: none; }
+
+.filter-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+.filter-bar label { margin-bottom: 0; }
+.filter-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.badge.dir-IN { background: rgba(74, 163, 255, .18); color: var(--accent); }
+.badge.dir-OUT { background: rgba(243, 156, 18, .20); color: #f39c12; }
+.badge.cat-CARGO_LOGISTIC { background: rgba(155, 89, 182, .22); color: #c39bd3; }
+.badge.cat-COMPANY_CAR { background: rgba(46, 204, 113, .18); color: var(--ok); }
+.badge.cat-EMPLOYEE { background: rgba(74, 163, 255, .16); color: var(--accent); }
+.badge.cat-GUEST { background: rgba(139, 152, 168, .22); color: #cfd8e3; }
+.badge.role-admin { background: rgba(231, 76, 60, .20); color: var(--bad); }
+.badge.role-satpam { background: rgba(46, 204, 113, .18); color: var(--ok); }
+.badge.role-hrga { background: rgba(74, 163, 255, .20); color: var(--accent); }
+.badge.role-beacukai { background: rgba(241, 196, 15, .20); color: var(--warn); }
+
+input[type=date], input[type=datetime-local] {
+  width: 100%; margin-top: 4px; padding: 8px 10px;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px; font: inherit;
+}

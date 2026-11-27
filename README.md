@@ -36,11 +36,19 @@ python run.py
 python run.py --prod --host 127.0.0.1 --port 5000
 ```
 
-Buka `http://localhost:5000` dan login terlebih dahulu (seluruh halaman dan endpoint `/api/*` dilindungi autentikasi sesi + CSRF):
-- **Admin**: `admin` / `admin123` (akses penuh termasuk ubah ambang `/api/settings`, ganti varian model YOLO, dan CRUD master kendaraan `/vehicles`)
-- **Satpam**: `satpam1` / `satpam123` (monitoring dashboard, kamera, simulasi, dan tindakan *Bypass* / *Tolak* pada log audit)
+Buka `http://localhost:5000` dan login terlebih dahulu (seluruh halaman dan endpoint `/api/*` dilindungi autentikasi sesi + RBAC + CSRF):
+- **Admin**: `admin` / `admin123` (akses penuh: pengaturan model/ambang `/api/settings`, `/training`, CRUD master kendaraan `/vehicles`, jadwal `/bookings`, dan seluruh log audit)
+- **Satpam**: `satpam1` / `satpam123` (dashboard live, kamera, foto manual, simulasi, pencatatan log keluar-masuk `IN`/`OUT`, `MANUAL_OVERRIDE` / `REJECTED`, dan lihat log)
+- **HRGA**: `hrga1` / `hrga123` (*read-only* pada log audit & master kendaraan, manajemen jadwal/izin kendaraan `/bookings`, serta ekspor CSV laporan; ditolak 403 dari kontrol gerbang & pengaturan AI)
+- **Bea Cukai**: `beacukai1` / `beacukai123` (*read-only* khusus pengawasan logistik/kepabeanan — default terfilter `CARGO_LOGISTIC` — melihat snapshot bukti plat & dokumen BC, serta ekspor CSV; ditolak 403 dari seluruh aksi mutasi)
 
-> **Keamanan Kredensial**: Ganti password default sebelum menjalankan di jaringan lokal dengan mengatur variabel lingkungan `SGS_ADMIN_PASSWORD`, `SGS_SATPAM_PASSWORD`, dan `SGS_SECRET_KEY`, lalu jalankan `python run.py --reset-db`.
+> **Keamanan Kredensial**: Ganti password default sebelum menjalankan di jaringan lokal dengan mengatur variabel lingkungan `SGS_ADMIN_PASSWORD`, `SGS_SATPAM_PASSWORD`, `SGS_HRGA_PASSWORD`, `SGS_BEACUKAI_PASSWORD`, dan `SGS_SECRET_KEY`, lalu jalankan `python run.py --reset-db`.
+
+### Sistem Log Kendaraan Terpadu & Kepatuhan (Satpam, HRGA, Bea Cukai)
+- **Pairing Otomatis `IN` ↔ `OUT` & Durasi Kunjungan (`dwell_minutes`)**: Setiap log `OUT` otomatis dipasangkan ke log `IN` terbuka terbaru dengan plat sama dan menghitung durasi kunjungan (`paired_log_id`, `dwell_minutes`).
+- **Klasifikasi Kunjungan & Dokumen Pabean**: Mendukung kategori `COMPANY_CAR`, `EMPLOYEE`, `CARGO_LOGISTIC`, dan `GUEST`, lengkap dengan jenis dokumen (`BC 2.3`, `BC 2.5`, `BC 2.7`, `BC 4.0`, `BC 4.1`, `SURAT_JALAN`), nomor dokumen/aju, dan nomor segel (*seal*).
+- **Penjadwalan Kendaraan (`vehicle_bookings`)**: Jadwal aktif dari HRGA otomatis mengisi metadata kategori, tujuan/PIC, dan nomor dokumen BC ke `gate_logs` saat kendaraan dipindai di gerbang.
+- **Ekspor Laporan Excel-Ready**: Endpoint `GET /api/logs/export.csv` menghasilkan berkas CSV UTF-8 dengan BOM sesuai filter aktif (`q`, `direction`, `visit_category`, `status=UNCLOSED_IN`, `bc_doc_type`, `date_from`, `date_to`). Lihat rincian perubahan di [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
@@ -157,7 +165,8 @@ Detail lengkap hasil pengecekan menyeluruh terhadap efisiensi CPU/RAM, akurasi p
 | Variabel | Default | Fungsi |
 | :--- | :--- | :--- |
 | `SGS_SECRET_KEY` | `(auto file)` | Kunci kriptografi sesi Flask (wajib diisi 32+ byte acak di produksi) |
-| `SGS_ADMIN_PASSWORD` / `SGS_SATPAM_PASSWORD` | `admin123` / `satpam123` | Password akun seed saat `init_db` / `--reset-db` |
+| `SGS_ADMIN_PASSWORD` / `SGS_SATPAM_PASSWORD` | `admin123` / `satpam123` | Password akun seed `admin` & `satpam1` saat `init_db` / `--reset-db` |
+| `SGS_HRGA_PASSWORD` / `SGS_BEACUKAI_PASSWORD` | `hrga123` / `beacukai123` | Password akun seed `hrga1` & `beacukai1` saat `init_db` / `--reset-db` |
 | `SGS_OCR_BACKEND` | `paddleocr` | Pilihan mesin OCR utama (`paddleocr`, `easyocr`, `template_match`) |
 | `SGS_ENABLE_SECONDARY_OCR` | `0` | Aktifkan (`1`) fallback lintas-engine OCR kedua (default `0` untuk mencegah dual-runtime RAM bloat) |
 | `SGS_SAVE_PIPELINE_STAGES` | `0` | Simpan seluruh 8 tahap citra PNG per frame (`1`) untuk laporan, atau hanya crop bukti *best frame* (`0`) |
@@ -175,7 +184,7 @@ Detail lengkap hasil pengecekan menyeluruh terhadap efisiensi CPU/RAM, akurasi p
 
 ## Pengujian & Evaluasi
 
-Jalankan suite pemeriksaan mandiri (**151 pemeriksaan** regresi utama di `tests/test_pipeline.py` tanpa ketergantungan `pytest`):
+Jalankan suite pemeriksaan mandiri (**170 pemeriksaan** regresi utama di `tests/test_pipeline.py` tanpa ketergantungan `pytest`):
 
 ```powershell
 cd "Tugas Citra Digital/prototype"

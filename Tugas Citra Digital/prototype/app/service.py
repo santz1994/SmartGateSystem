@@ -166,18 +166,113 @@ _INFERENCE_SLOTS = threading.Semaphore(int(os.getenv("SGS_MAX_CONCURRENT_INFER",
 LOG_COOLDOWN_SECONDS = float(os.getenv("SGS_LOG_COOLDOWN_SECONDS", "60"))
 _recent_log_plates: dict[str, float] = {}
 
-def _plate_log_duplicate(plate_text: str | None) -> bool:
-    """Catat kemunculan plat; True bila plat sama sudah dicatat dalam cooldown."""
+def _plate_log_duplicate(plate_text: str | None, direction: str = "IN") -> bool:
+    """Catat kemunculan plat per arah; True bila plat + arah sama sudah dicatat dalam cooldown."""
     key = (plate_text or "").strip().upper()
     if not key:
         return False
+    scoped_key = f"{direction.upper()}:{key}"
     now = time.monotonic()
     for text, seen in list(_recent_log_plates.items()):
         if now - seen > LOG_COOLDOWN_SECONDS:
             del _recent_log_plates[text]
-    last = _recent_log_plates.get(key)
-    _recent_log_plates[key] = now
+    last = _recent_log_plates.get(scoped_key)
+    _recent_log_plates[scoped_key] = now
     return last is not None and now - last <= LOG_COOLDOWN_SECONDS
+
+
+def validate_log_metadata(raw: dict[str, Any] | None) -> tuple[dict[str, Any], str | None]:
+    """Validasi & bersihkan metadata kunjungan/dokumen BC sebelum disimpan ke ``gate_logs``."""
+    if not raw:
+        return {}, None
+    clean: dict[str, Any] = {}
+    if "direction" in raw and raw["direction"] is not None:
+        direction = str(raw["direction"]).strip().upper()
+        if direction not in db.DIRECTIONS:
+            return {}, f"Arah gerbang tidak valid: {direction}"
+        clean["direction"] = direction
+    if "visit_category" in raw and raw["visit_category"] is not None:
+        cat = str(raw["visit_category"]).strip().upper()
+        if cat not in db.VISIT_CATEGORIES:
+            return {}, f"Kategori kunjungan tidak valid: {cat}"
+        clean["visit_category"] = cat
+    if "bc_doc_type" in raw and raw["bc_doc_type"] is not None:
+        doc_type = str(raw["bc_doc_type"]).strip().upper()
+        if doc_type not in db.BC_DOC_TYPES:
+            return {}, f"Jenis dokumen pabean tidak valid: {doc_type}"
+        clean["bc_doc_type"] = doc_type
+
+    text_limits = (
+        ("driver_or_guest_name", 120, "Nama pengemudi/tamu"),
+        ("company_or_vendor", 120, "Nama perusahaan/ekspedisi"),
+        ("visit_purpose_or_host", 200, "Tujuan/PIC"),
+        ("bc_doc_number", 64, "Nomor dokumen BC/Surat Jalan"),
+        ("seal_number", 64, "Nomor segel"),
+    )
+    for field, limit, label in text_limits:
+        if field in raw and raw[field] is not None:
+            val = str(raw[field]).strip()
+            if len(val) > limit:
+                return {}, f"{label} maksimal {limit} karakter."
+            clean[field] = val
+
+    if clean.get("visit_category") == "CARGO_LOGISTIC":
+        doc_type = clean.get("bc_doc_type", "NONE")
+        doc_num = clean.get("bc_doc_number", "")
+        if doc_type != "NONE" and not doc_num:
+            return {}, "Nomor dokumen BC / Surat Jalan wajib diisi bila jenis dokumen dipilih."
+    return clean, None
+
+
+def _infer_visit_metadata(
+    match: Any,
+    vbooking: Any,
+    explicit: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Gabungkan metadata dari input eksplisit -> vehicle_bookings -> master_vehicles -> default."""
+    meta: dict[str, Any] = {
+        "visit_category": "GUEST",
+        "driver_or_guest_name": "",
+        "company_or_vendor": "",
+        "visit_purpose_or_host": "",
+        "bc_doc_type": "NONE",
+        "bc_doc_number": "",
+        "seal_number": "",
+    }
+    if match is not None:
+        owner_type = match["owner_type"]
+        vtype = match["vehicle_type"]
+        if vtype == "truck":
+            meta["visit_category"] = "CARGO_LOGISTIC"
+            meta["company_or_vendor"] = match["owner_name"] or ""
+        elif owner_type == "karyawan":
+            meta["visit_category"] = "EMPLOYEE"
+            meta["driver_or_guest_name"] = match["owner_name"] or ""
+        elif owner_type == "warga":
+            meta["visit_category"] = "COMPANY_CAR"
+            meta["driver_or_guest_name"] = match["owner_name"] or ""
+        else:
+            meta["visit_category"] = "GUEST"
+            meta["company_or_vendor"] = match["owner_name"] or ""
+
+    if vbooking is not None:
+        meta["visit_category"] = vbooking["visit_category"] or meta["visit_category"]
+        if vbooking["driver_or_guest_name"]:
+            meta["driver_or_guest_name"] = vbooking["driver_or_guest_name"]
+        if vbooking["company_or_vendor"]:
+            meta["company_or_vendor"] = vbooking["company_or_vendor"]
+        if vbooking["visit_purpose_or_host"]:
+            meta["visit_purpose_or_host"] = vbooking["visit_purpose_or_host"]
+        if vbooking["bc_doc_type"]:
+            meta["bc_doc_type"] = vbooking["bc_doc_type"]
+        if vbooking["bc_doc_number"]:
+            meta["bc_doc_number"] = vbooking["bc_doc_number"]
+
+    if explicit:
+        for k, v in explicit.items():
+            if k in meta and v not in (None, ""):
+                meta[k] = v
+    return meta
 
 def _prune_snapshots() -> None:
     if not config.SNAPSHOT_DIR.is_dir():
@@ -400,12 +495,15 @@ def evaluate(
     plate_enabled: bool = True,
     sticker_enabled: bool = True,
     fast: bool = False,
+    direction: str = "IN",
+    metadata: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     """Proses semua citra satu sesi dan hasilkan keputusan.
 
     ``images`` berisi tuple ``(label, np.ndarray BGR, cctv_role)``.
     """
     session_id = session_id or uuid.uuid4().hex[:12]
+    norm_direction = "OUT" if str(direction or "IN").strip().upper() == "OUT" else "IN"
     db_available = True
     try:
         thresholds = db.settings()
@@ -446,18 +544,20 @@ def evaluate(
     )
 
     # --- Pencocokan database (fail-safe: error DB => tidak auto-open) ---
-    match = booking = None
+    match = booking = vbooking = None
     if db_available:
         try:
             match = db.find_vehicle(plate_text, sticker_code)
             if match is not None and not fusion.evidence_matches_vehicle(match, plate_text, sticker_code):
                 match = None
                 booking = None
+            if plate_text:
+                vbooking = db.active_vehicle_booking(plate_text)
             if match is not None and match["requires_booking"] and plate_text:
                 booking = db.active_booking(plate_text)
         except sqlite3.Error:
             db_available = False
-            match = booking = None
+            match = booking = vbooking = None
 
     decision, reason = fusion.decide(
         plate_text=plate_text,
@@ -468,7 +568,13 @@ def evaluate(
         match=match,
         thresholds=thresholds,
     )
-    if decision == fusion.AUTO_OPEN and match is not None and match["requires_booking"] and booking is None:
+    if (
+        decision == fusion.AUTO_OPEN
+        and match is not None
+        and match["requires_booking"]
+        and booking is None
+        and vbooking is None
+    ):
         decision, reason = fusion.NO_MATCH, "Kendaraan terdaftar tapi booking tidak aktif"
     if decision == fusion.OCR_FAILED and plate_text is None and any(f.plate_raw_text for f in frames):
         reason = (
@@ -477,6 +583,8 @@ def evaluate(
         )
     if not db_available:
         reason = "Database tidak tersedia — dialihkan ke satpam (fail-safe)"
+
+    visit_meta = _infer_visit_metadata(match, vbooking, explicit=metadata)
 
     # --- Simpan snapshot + log ---
     snapshot_url = None
@@ -506,8 +614,8 @@ def evaluate(
                 ocr_backend=frame.ocr_backend,
                 vehicle_class=frame.vehicle_class,
             )
-        if _plate_log_duplicate(plate_text):
-            # Plat sama baru saja dicatat — 1 kendaraan = 1 kejadian.
+        if _plate_log_duplicate(plate_text, direction=norm_direction):
+            # Plat sama pada arah sama baru saja dicatat — 1 kendaraan = 1 kejadian.
             log_deduped = True
         else:
             log_id = db.insert_gate_log(
@@ -520,6 +628,8 @@ def evaluate(
                 matched_booking_id=booking["id"] if booking is not None else None,
                 snapshot_url=snapshot_url,
                 reason=reason,
+                direction=norm_direction,
+                **visit_meta,
             )
         _prune_snapshots()
 
@@ -617,14 +727,28 @@ def _save_failed_diagnostics(frame: FrameResult, session_id: str) -> None:
 
 # --- Tindakan satpam ----------------------------------------------------------
 
-def guard_action(log_id: int, action: str, username: str, note: str) -> tuple[bool, str]:
-    """Bypass (MANUAL_OVERRIDE) atau tolak (REJECTED) oleh satpam."""
-    if action not in ("bypass", "reject"):
+def guard_action(
+    log_id: int,
+    action: str,
+    username: str,
+    note: str,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[bool, str]:
+    """Bypass (MANUAL_OVERRIDE), tolak (REJECTED), atau lengkapi metadata kunjungan oleh satpam."""
+    if action not in ("bypass", "reject", "update"):
         return False, "Aksi tidak dikenal"
+    clean_meta, err = validate_log_metadata(metadata)
+    if err:
+        return False, err
+    if action == "update":
+        if not clean_meta:
+            return False, "Tidak ada data kunjungan yang diperbarui"
+        ok = db.update_gate_log_metadata(log_id, clean_meta)
+        return (True, "Metadata log berhasil disimpan") if ok else (False, "Log tidak ditemukan")
     if not note.strip():
         return False, "Catatan wajib diisi untuk audit"
     decision = fusion.MANUAL_OVERRIDE if action == "bypass" else fusion.REJECTED
-    ok = db.resolve_override(log_id, decision, username, note.strip())
+    ok = db.resolve_override(log_id, decision, username, note.strip(), metadata=clean_meta)
     if not ok:
         return False, "Log tidak ditemukan atau sudah final"
     return True, DECISION_LABEL[decision]

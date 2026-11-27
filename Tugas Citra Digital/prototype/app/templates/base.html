@@ -13,21 +13,32 @@
     <div class="brand">
       <span class="dot"></span>
       <strong>Smart Gate</strong>
-      <span class="muted">Prototipe Pengolahan Citra Digital</span>
+      <span class="muted">Sistem Log Kendaraan Terpadu</span>
     </div>
+    {% set role = auth.current_role() %}
+    {% if role %}
     <nav>
       <a href="{{ url_for('dashboard') }}">Dashboard</a>
-      <a href="{{ url_for('upload_page') }}">Foto Manual</a>
-      <a href="{{ url_for('camera_page') }}">Kamera</a>
-      <a href="{{ url_for('vehicles_page') }}">Kendaraan</a>
-      <a href="{{ url_for('training_page') }}">Training</a>
-      <a href="{{ url_for('logs_page') }}">Log</a>
+      {% if role in ('admin', 'satpam') %}
+        <a href="{{ url_for('upload_page') }}">Foto Manual</a>
+        <a href="{{ url_for('camera_page') }}">Kamera</a>
+      {% endif %}
+      {% if role in ('admin', 'satpam', 'hrga') %}
+        <a href="{{ url_for('vehicles_page') }}">Kendaraan</a>
+      {% endif %}
+      {% if role in ('admin', 'hrga') %}
+        <a href="{{ url_for('bookings_page') }}">Jadwal / Izin</a>
+      {% endif %}
+      {% if role == 'admin' %}
+        <a href="{{ url_for('training_page') }}">Training</a>
+      {% endif %}
+      <a href="{{ url_for('logs_page') }}">{{ 'Log Bea Cukai' if role == 'beacukai' else 'Log Audit' }}</a>
       <a href="{{ url_for('api_health') }}" target="_blank">Health</a>
     </nav>
-    {% if auth.current_user() %}
-    <div class="muted">
-      {{ auth.current_user() }} ({{ auth.current_role() }})
-      <form method="post" action="{{ url_for('logout') }}" style="display:inline">
+    <div class="userbar muted">
+      <span>{{ auth.current_user() }}</span>
+      <span class="badge role-{{ role }}">{{ role_labels.get(role, role) }}</span>
+      <form method="post" action="{{ url_for('logout') }}" class="inline-form">
         <input type="hidden" name="csrf" value="{{ csrf_token }}">
         <button class="small" type="submit">Keluar</button>
       </form>
@@ -40,7 +51,7 @@
   </main>
 
   <footer class="muted">
-    Prototipe — SQLite + OpenCV. OCR backend: <code>{{ backend if backend is defined else 'n/a' }}</code>
+    Smart Gate System — SQLite + OpenCV/ONNX. OCR backend: <code>{{ backend if backend is defined else 'n/a' }}</code>
   </footer>
   <script src="{{ url_for('static', filename='app.js', v=app_version) }}"></script>
   {% block scripts %}{% endblock %}

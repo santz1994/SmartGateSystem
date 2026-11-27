@@ -734,6 +734,219 @@ def test_real_plat_nomor_dataset() -> None:
     )
 
 
+def test_integrated_logs_rbac_and_export() -> None:
+    print("sistem log terpadu, migrasi SQL, pairing IN/OUT, RBAC & ekspor CSV")
+    import sqlite3
+    import tempfile
+    from pathlib import Path as _Path
+
+    from app import config as _config, db as _db, service as _service, web as _web
+
+    # 1. Uji validasi metadata kargo (dokumen BC & segel) dan tamu
+    cargo_ok, err_ok = _service.validate_log_metadata({
+        "direction": "IN",
+        "visit_category": "CARGO_LOGISTIC",
+        "driver_or_guest_name": "Hendra",
+        "company_or_vendor": "PT Mitra Logistik",
+        "bc_doc_type": "BC 4.0",
+        "bc_doc_number": "000123-20261127",
+        "seal_number": "SL-889201",
+    })
+    check("metadata kargo BC 4.0 + segel valid", err_ok is None and cargo_ok["seal_number"] == "SL-889201")
+
+    _, err_missing_doc = _service.validate_log_metadata({
+        "visit_category": "CARGO_LOGISTIC",
+        "bc_doc_type": "BC 2.3",
+        "bc_doc_number": "",
+    })
+    check("kargo dengan jenis dokumen BC tanpa nomor ditolak", err_missing_doc is not None)
+
+    guest_ok, err_guest = _service.validate_log_metadata({
+        "direction": "IN",
+        "visit_category": "GUEST",
+        "driver_or_guest_name": "Rudi Hartono",
+        "company_or_vendor": "PT Vendor",
+        "visit_purpose_or_host": "HRGA / Ibu Rina",
+    })
+    check("metadata tamu valid", err_guest is None and guest_ok["visit_category"] == "GUEST")
+
+    orig_db_path = _config.DB_PATH
+    with tempfile.TemporaryDirectory() as tmp:
+        _config.DB_PATH = _Path(tmp) / "legacy_test.db"
+        _db._settings_cache.clear()
+        try:
+            # 2. Simulasi DB lama (users hanya admin/satpam, gate_logs tanpa kolom baru) lalu init_db()
+            legacy_conn = sqlite3.connect(_config.DB_PATH)
+            legacy_conn.executescript(
+                """
+                CREATE TABLE users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL UNIQUE,
+                    full_name TEXT NOT NULL,
+                    role TEXT NOT NULL CHECK (role IN ('admin', 'satpam')),
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE gate_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    plate_text TEXT,
+                    sticker_code TEXT,
+                    fused_score REAL NOT NULL DEFAULT 0,
+                    matched_vehicle_id INTEGER,
+                    matched_booking_id INTEGER,
+                    snapshot_url TEXT,
+                    reason TEXT,
+                    override_by TEXT,
+                    override_note TEXT,
+                    override_at TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                """
+            )
+            legacy_conn.commit()
+            legacy_conn.close()
+
+            _db.init_db()
+            with _db.session() as conn:
+                log_cols = {r["name"] for r in conn.execute("PRAGMA table_info(gate_logs)")}
+                tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                roles = {r["role"] for r in conn.execute("SELECT role FROM users")}
+            check(
+                "migrasi otomatis menambah kolom operasional & BC ke gate_logs",
+                {"direction", "visit_category", "paired_log_id", "dwell_minutes", "bc_doc_type", "bc_doc_number", "seal_number"} <= log_cols,
+            )
+            check("tabel vehicle_bookings terbentuk", "vehicle_bookings" in tables)
+            check("seed user mencakup admin, satpam, hrga, beacukai", {"admin", "satpam", "hrga", "beacukai"} <= roles)
+
+            # 3. Pairing IN -> OUT & dwell_minutes (selisih 135 menit = 2 jam 15 menit)
+            in_id = _db.insert_gate_log(
+                session_id="sess-in-1",
+                decision="AUTO_OPEN",
+                plate_text="B9012QWE",
+                fused_score=0.95,
+                direction="IN",
+                visit_category="CARGO_LOGISTIC",
+                driver_or_guest_name="Hendra",
+                company_or_vendor="PT Mitra Logistik",
+                bc_doc_type="BC 4.0",
+                bc_doc_number="BC40-991",
+                seal_number="SEAL-77",
+                created_at="2026-11-27 08:00:00",
+            )
+            out_id = _db.insert_gate_log(
+                session_id="sess-out-1",
+                decision="AUTO_OPEN",
+                plate_text="B 9012 QWE",
+                fused_score=0.96,
+                direction="OUT",
+                visit_category="CARGO_LOGISTIC",
+                driver_or_guest_name="Hendra",
+                company_or_vendor="PT Mitra Logistik",
+                bc_doc_type="BC 4.0",
+                bc_doc_number="BC40-991",
+                seal_number="SEAL-77",
+                created_at="2026-11-27 10:15:00",
+            )
+            in_row = _db.get_gate_log(in_id)
+            out_row = _db.get_gate_log(out_id)
+            check(
+                "pairing IN <-> OUT menghubungkan paired_log_id kedua arah",
+                in_row["paired_log_id"] == out_id and out_row["paired_log_id"] == in_id,
+                f"(in={in_row['paired_log_id']}, out={out_row['paired_log_id']})",
+            )
+            check(
+                "dwell_minutes terhitung akurat (135 menit = 2 jam 15 menit)",
+                out_row["dwell_minutes"] == 135 and _db.format_dwell(out_row["dwell_minutes"]) == "2 jam 15 menit",
+                f"(dapat {out_row['dwell_minutes']})",
+            )
+
+            # Tambah satu log tamu yang masih di dalam (UNCLOSED_IN) & pending
+            guest_in_id = _db.insert_gate_log(
+                session_id="sess-guest-1",
+                decision="NO_MATCH",
+                plate_text="D5678XYZ",
+                fused_score=0.88,
+                direction="IN",
+                visit_category="GUEST",
+                driver_or_guest_name="Bapak Tamu",
+                company_or_vendor="PT Tamu Sejahtera",
+                created_at="2026-11-27 09:00:00",
+            )
+            unclosed = _db.list_gate_logs(status="UNCLOSED_IN")
+            check(
+                "filter UNCLOSED_IN hanya mengembalikan kendaraan yang belum keluar",
+                [r["id"] for r in unclosed] == [guest_in_id],
+                f"(dapat {[r['id'] for r in unclosed]})",
+            )
+
+            # 4. Uji RBAC & endpoint ekspor CSV via Flask test_client
+            app = _web.create_app()
+            app.config["TESTING"] = True
+
+            def _login_as(client, username: str, password: str) -> str:
+                client.post("/login", data={"username": username, "password": password})
+                with client.session_transaction() as sess:
+                    return sess.get("csrf", "")
+
+            # Role HRGA
+            hrga_client = app.test_client()
+            hrga_csrf = _login_as(hrga_client, "hrga1", _db.SEED_PASSWORDS["hrga1"])
+            check("HRGA dapat membaca GET /logs (200)", hrga_client.get("/logs").status_code == 200)
+            check("HRGA dapat membaca GET /bookings (200)", hrga_client.get("/bookings").status_code == 200)
+            res_hrga_override = hrga_client.post(
+                f"/api/logs/{guest_in_id}/action",
+                json={"action": "bypass", "note": "coba bypass"},
+                headers={"X-CSRF-Token": hrga_csrf},
+            )
+            check("HRGA ditolak HTTP 403 saat MANUAL_OVERRIDE", res_hrga_override.status_code == 403)
+            res_hrga_settings = hrga_client.post(
+                "/api/settings",
+                json={"fused_confidence_threshold": 0.91},
+                headers={"X-CSRF-Token": hrga_csrf},
+            )
+            check("HRGA ditolak HTTP 403 saat POST /api/settings", res_hrga_settings.status_code == 403)
+            res_hrga_csv = hrga_client.get("/api/logs/export.csv?status=UNCLOSED_IN")
+            csv_hrga_text = res_hrga_csv.data.decode("utf-8")
+            check(
+                "HRGA ekspor CSV 200 + UTF-8 BOM + data terfilter UNCLOSED_IN",
+                res_hrga_csv.status_code == 200
+                and csv_hrga_text.startswith("\ufeffID,Waktu,Arah,Kategori")
+                and "D5678XYZ" in csv_hrga_text
+                and "BC40-991" not in csv_hrga_text,
+            )
+
+            # Role Bea Cukai
+            bc_client = app.test_client()
+            bc_csrf = _login_as(bc_client, "beacukai1", _db.SEED_PASSWORDS["beacukai1"])
+            check("Bea Cukai dapat membaca GET /logs (200)", bc_client.get("/logs").status_code == 200)
+            check("Bea Cukai ditolak HTTP 403 pada GET /bookings", bc_client.get("/bookings").status_code == 403)
+            res_bc_override = bc_client.post(
+                f"/api/logs/{guest_in_id}/action",
+                json={"action": "bypass", "note": "coba bypass"},
+                headers={"X-CSRF-Token": bc_csrf},
+            )
+            check("Bea Cukai ditolak HTTP 403 saat MANUAL_OVERRIDE", res_bc_override.status_code == 403)
+            res_bc_settings = bc_client.post(
+                "/api/settings",
+                json={"fused_confidence_threshold": 0.91},
+                headers={"X-CSRF-Token": bc_csrf},
+            )
+            check("Bea Cukai ditolak HTTP 403 saat POST /api/settings", res_bc_settings.status_code == 403)
+            res_bc_csv = bc_client.get("/api/logs/export.csv")
+            csv_bc_text = res_bc_csv.data.decode("utf-8")
+            check(
+                "Bea Cukai ekspor CSV 200 default terfilter CARGO_LOGISTIC",
+                res_bc_csv.status_code == 200
+                and "BC40-991" in csv_bc_text
+                and "SEAL-77" in csv_bc_text
+                and "D5678XYZ" not in csv_bc_text,
+            )
+        finally:
+            _config.DB_PATH = orig_db_path
+            _db._settings_cache.clear()
+
+
 def main() -> int:
     tests = [
         test_normalize_plate,
@@ -751,6 +964,7 @@ def main() -> int:
         test_cpu_ram_optimizations,
         test_kfold_stratified_group_cv,
         test_security_and_cleanup_polish,
+        test_integrated_logs_rbac_and_export,
         test_real_plat_nomor_dataset,
         test_signed_sticker_token,
         test_read_plate_robust,
